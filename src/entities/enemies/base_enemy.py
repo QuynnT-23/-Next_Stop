@@ -46,6 +46,30 @@ class BaseEnemy(Entity):
             self.max_health = int(self.max_health * 1.35)
             self.health = self.max_health
 
+    def apply_difficulty_scaling(self, hp_mult: float = 1.0, speed_mult: float = 1.0, damage_mult: float = 1.0, attack_rate_mult: float = 1.0):
+        """Dynamically scales enemy health, speed, damage, and attack frequency based on stage and car progression."""
+        self.max_health = max(1, int(self.max_health * hp_mult))
+        self.health = self.max_health
+        self.base_speed *= speed_mult
+        self.speed = self.base_speed
+        self.damage_multiplier = damage_mult
+        self.attack_rate_multiplier = attack_rate_mult
+
+        if hasattr(self, "windup_duration"):
+            self.windup_duration = max(0.18, self.windup_duration / attack_rate_mult)
+        if hasattr(self, "cooldown_duration"):
+            self.cooldown_duration = max(0.25, self.cooldown_duration / attack_rate_mult)
+        if hasattr(self, "shot_speed"):
+            self.shot_speed *= (1.0 + (speed_mult - 1.0) * 0.6)
+        if hasattr(self, "lob_cooldown"):
+            self.lob_cooldown = max(1.0, self.lob_cooldown / attack_rate_mult)
+        if hasattr(self, "fire_timer"):
+            self.fire_timer = max(0.8, self.fire_timer / attack_rate_mult)
+        if hasattr(self, "slam_windup"):
+            self.slam_windup = max(0.35, self.slam_windup / attack_rate_mult)
+        if hasattr(self, "melee_damage"):
+            self.melee_damage = max(1, int(self.melee_damage * damage_mult))
+
     def get_flocking_separation(self, all_enemies) -> pygame.math.Vector2:
         """Compute repulsive force away from nearby enemy neighbors to prevent clumping."""
         force = pygame.math.Vector2(0, 0)

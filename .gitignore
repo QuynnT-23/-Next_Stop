@@ -15,3 +15,8 @@ ENV/
 
 # Archives
 *.zip
+
+# Local save data & history
+save_data.json
+.Rhistory
+

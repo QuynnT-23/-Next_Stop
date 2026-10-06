@@ -6,7 +6,7 @@ import math
 import random
 from src.config import (
     COLOR_WHITE, COLOR_BRASS, COLOR_BRASS_HIGHLIGHT,
-    COLOR_STEEL_DARK, COLOR_STEEL_MID, COLOR_EMBER_ORANGE,
+    COLOR_STEEL_DARK, COLOR_STEEL_MID, COLOR_STEEL_LIGHT, COLOR_EMBER_ORANGE,
     COLOR_LIGHTNING_CYAN, COLOR_CRIT_YELLOW, COLOR_CARPET_RED
 )
 
@@ -45,12 +45,22 @@ def draw_stoker_player(surface: pygame.Surface, screen_pos: tuple, aim_angle: fl
     """Renders the rugged train stoker hero with dirty shirt, burly arms, pants, boots, and held weapon."""
     cx, cy = int(screen_pos[0]), int(screen_pos[1])
     
+    # Idle breathing bobbing & weight-shift
+    ticks = pygame.time.get_ticks()
+    breath_bob = math.sin(ticks * 0.005) * 1.5 if not is_moving else 0.0
+    breath_sway = math.cos(ticks * 0.003) * 0.8 if not is_moving else 0.0
+    lean_x = math.cos(aim_angle) * 2.5 if is_moving else 0.0
+    lean_y = math.sin(aim_angle) * 2.5 if is_moving else 0.0
+
+    cx += int(breath_sway + lean_x)
+    cy += int(breath_bob + lean_y)
+
     # 1. Soft Oval Drop Shadow
     shadow_w = int(radius * 2.1)
     shadow_h = int(radius * 0.95)
     shadow_surf = pygame.Surface((shadow_w, shadow_h), pygame.SRCALPHA)
     pygame.draw.ellipse(shadow_surf, (0, 0, 0, 95), (0, 0, shadow_w, shadow_h))
-    surface.blit(shadow_surf, (cx - shadow_w // 2, cy + int(radius * 0.45)))
+    surface.blit(shadow_surf, (cx - shadow_w // 2, cy + int(radius * 0.45) - int(breath_bob)))
 
     # Direction vectors
     aim_cos = math.cos(aim_angle)
@@ -269,6 +279,27 @@ def draw_held_weapon(surface: pygame.Surface, pos: tuple, aim_angle: float, weap
         pygame.draw.circle(surface, COLOR_LIGHTNING_CYAN, (int(tip_x), int(tip_y)), 4)
         pygame.draw.circle(surface, COLOR_WHITE, (int(tip_x), int(tip_y)), 2)
 
+    # Mechanical slide recoil: Sharp starburst muzzle flash & ejected shell casing
+    if recoil_timer > 0 and "cleaver" not in w_name and "wrench" not in w_name:
+        flash_p = min(1.0, recoil_timer * 12.0)
+        flash_barrel_len = 28 if ("tesla" in w_name or "arc" in w_name) else (24 if ("scatter" in w_name or "shotgun" in w_name) else 26)
+        flash_x = wx + cos_a * flash_barrel_len
+        flash_y = wy + sin_a * flash_barrel_len
+        star_r = 11.0 * flash_p
+        pts = []
+        for s_i in range(8):
+            s_ang = aim_angle + (s_i * math.pi / 4.0)
+            s_dist = star_r if s_i % 2 == 0 else (star_r * 0.42)
+            pts.append((flash_x + math.cos(s_ang) * s_dist, flash_y + math.sin(s_ang) * s_dist))
+        if len(pts) >= 3:
+            flash_col = COLOR_LIGHTNING_CYAN if ("tesla" in w_name or "arc" in w_name) else COLOR_CRIT_YELLOW
+            pygame.draw.polygon(surface, flash_col, pts)
+            pygame.draw.circle(surface, COLOR_WHITE, (int(flash_x), int(flash_y)), max(2, int(star_r * 0.4)))
+        # Ejected brass shell casing spinning out
+        case_dist = 8.0 + (1.0 - flash_p) * 16.0
+        case_x = wx - perp_x * case_dist - cos_a * 4
+        case_y = wy - perp_y * case_dist - sin_a * 4
+        pygame.draw.rect(surface, COLOR_BRASS_HIGHLIGHT, (int(case_x), int(case_y), 4, 2))
 
 # =========================================================================
 # ENEMY CHARACTER ANATOMY & PROCEDURAL SPRITE OVERHAUL
@@ -956,4 +987,642 @@ def draw_furnace_golem_sprite(surface: pygame.Surface, screen_pos: tuple, enemy)
 
     if getattr(enemy, "is_elite", False):
         draw_elite_indicator(surface, cx, cy, enemy)
+
+
+# =========================================================================
+# 8 STAGE BOSS PROCEDURAL SPRITE RENDERERS (STAGES 2 THROUGH 5)
+# =========================================================================
+
+def draw_scrapper_foreman_sprite(surface: pygame.Surface, screen_pos: tuple, boss):
+    """Draws Scrapper Foreman: Burly scrap raider in welder's apron with giant iron pipe wrench."""
+    cx, cy = int(screen_pos[0]), int(screen_pos[1])
+    r = boss.radius
+    fa = boss.facing_angle
+    cos_f = math.cos(fa)
+    sin_f = math.sin(fa)
+    perp_x = -sin_f
+    perp_y = cos_f
+    ticks = pygame.time.get_ticks()
+
+    # Drop shadow
+    shadow_w = int(r * 2.1)
+    shadow_h = int(r * 0.95)
+    shadow_surf = pygame.Surface((shadow_w, shadow_h), pygame.SRCALPHA)
+    pygame.draw.ellipse(shadow_surf, (0, 0, 0, 100), (0, 0, shadow_w, shadow_h))
+    surface.blit(shadow_surf, (cx - shadow_w // 2, cy + int(r * 0.45)))
+
+    # Whirlwind attack visual blur
+    is_whirlwind = getattr(boss, "current_attack", None) == "whirlwind"
+    if is_whirlwind:
+        blur_surf = pygame.Surface((int(r * 2.8), int(r * 2.8)), pygame.SRCALPHA)
+        pygame.draw.circle(blur_surf, (220, 130, 40, 70), (int(r * 1.4), int(r * 1.4)), int(r * 1.3), 8)
+        surface.blit(blur_surf, (cx - int(r * 1.4), cy - int(r * 1.4)))
+
+    # Heavy boots
+    for s in (-1, 1):
+        bx = cx + int(perp_x * s * 11 - cos_f * 4)
+        by = cy + int(perp_y * s * 11 - sin_f * 4 + 14)
+        pygame.draw.rect(surface, (35, 25, 20), (bx - 5, by - 4, 10, 8), border_radius=2)
+        pygame.draw.rect(surface, (70, 45, 30), (bx - 4, by - 6, 8, 7), border_radius=2)
+
+    # Leather welder's apron & torso
+    flash = getattr(boss, "flash_timer", 0) > 0
+    body_col = COLOR_WHITE if flash else (145, 85, 45)
+    pygame.draw.circle(surface, (45, 30, 22), (cx, cy), int(r * 0.85))
+    pygame.draw.circle(surface, body_col, (cx, cy), int(r * 0.80))
+    # Grease / soot smudges on apron
+    pygame.draw.ellipse(surface, (35, 25, 20), (cx - 8, cy - 6, 12, 16))
+    pygame.draw.line(surface, (55, 38, 28), (cx - 10, cy - 14), (cx + 10, cy + 12), 3)
+
+    # Heavy toolbelt with chains and spanners
+    pygame.draw.rect(surface, (40, 28, 20), (cx - 16, cy + 4, 32, 7), border_radius=2)
+    pygame.draw.rect(surface, COLOR_BRASS_HIGHLIGHT, (cx - 6, cy + 3, 12, 9), 2, border_radius=1)
+    # Dangling scrap chains
+    pygame.draw.line(surface, (140, 130, 120), (cx - 12, cy + 11), (cx - 8, cy + 19), 2)
+    pygame.draw.line(surface, (140, 130, 120), (cx + 10, cy + 11), (cx + 14, cy + 20), 2)
+
+    # Spiked scrap iron shoulder pauldrons
+    for s in (-1, 1):
+        px = cx + perp_x * (s * 18)
+        py = cy + perp_y * (s * 18)
+        pygame.draw.circle(surface, (80, 75, 70), (int(px), int(py)), 9)
+        pygame.draw.circle(surface, (130, 120, 110), (int(px), int(py)), 7)
+        # Spikes protruding from shoulder
+        spk_x = px + perp_x * (s * 6) - cos_f * 4
+        spk_y = py + perp_y * (s * 6) - sin_f * 4
+        pygame.draw.line(surface, (200, 190, 180), (int(px), int(py)), (int(spk_x), int(spk_y)), 3)
+
+    # Muscular gauntleted arms holding giant pipe wrench
+    w_ang = fa + (ticks * 0.02 if is_whirlwind else 0.5)
+    w_cos = math.cos(w_ang)
+    w_sin = math.sin(w_ang)
+    w_perp_x = -w_sin
+    w_perp_y = w_cos
+
+    w_base_x = cx + cos_f * 12 + perp_x * 8
+    w_base_y = cy + sin_f * 12 + perp_y * 8
+    w_len = 38
+    w_head_x = w_base_x + w_cos * w_len
+    w_head_y = w_base_y + w_sin * w_len
+
+    # Steel shaft of wrench
+    pygame.draw.line(surface, (60, 58, 55), (int(w_base_x), int(w_base_y)), (int(w_head_x), int(w_head_y)), 8)
+    pygame.draw.line(surface, (160, 155, 145), (int(w_base_x), int(w_base_y)), (int(w_head_x), int(w_head_y)), 4)
+    # Heavy toothed wrench jaw
+    jaw_p1 = (int(w_head_x + w_perp_x * 10), int(w_head_y + w_perp_y * 10))
+    jaw_p2 = (int(w_head_x - w_perp_x * 6), int(w_head_y - w_perp_y * 6))
+    jaw_p3 = (int(w_head_x + w_cos * 10 + w_perp_x * 12), int(w_head_y + w_sin * 10 + w_perp_y * 12))
+    jaw_p4 = (int(w_head_x + w_cos * 10 - w_perp_x * 4), int(w_head_y + w_sin * 10 - w_perp_y * 4))
+    pygame.draw.polygon(surface, (100, 95, 90), [jaw_p1, jaw_p2, jaw_p4, jaw_p3])
+    pygame.draw.polygon(surface, (170, 160, 150), [jaw_p1, jaw_p2, jaw_p4, jaw_p3], 2)
+    # Pipe wrench knurled adjustment ring
+    pygame.draw.circle(surface, COLOR_BRASS_HIGHLIGHT, (int(w_base_x + w_cos * 16), int(w_base_y + w_sin * 16)), 5)
+
+    # Welder's heavy protective helmet
+    head_x = cx + cos_f * 6
+    head_y = cy + sin_f * 6 - 8
+    pygame.draw.circle(surface, (50, 45, 42), (int(head_x), int(head_y)), 12)
+    pygame.draw.rect(surface, (75, 70, 68), (int(head_x - 9), int(head_y - 9), 18, 18), border_radius=4)
+    pygame.draw.rect(surface, (35, 30, 28), (int(head_x - 9), int(head_y - 9), 18, 18), 2, border_radius=4)
+    # Glowing amber welding visor slit
+    visor_w = 12
+    visor_h = 4
+    vx = head_x + cos_f * 4 - visor_w // 2
+    vy = head_y + sin_f * 4 - visor_h // 2
+    glow_pulse = (math.sin(ticks * 0.01) + 1) * 0.5
+    visor_col = (255, int(150 + 80 * glow_pulse), 30)
+    pygame.draw.rect(surface, visor_col, (int(vx), int(vy), visor_w, visor_h), border_radius=1)
+    pygame.draw.line(surface, COLOR_WHITE, (int(vx + 2), int(vy + 1)), (int(vx + visor_w - 2), int(vy + 1)), 1)
+
+
+def draw_vermin_brood_engine_sprite(surface: pygame.Surface, screen_pos: tuple, boss):
+    """Draws Vermin Brood Engine: Corroded industrial incinerator boiler swarming with toxic pestilence."""
+    cx, cy = int(screen_pos[0]), int(screen_pos[1])
+    r = boss.radius
+    ticks = pygame.time.get_ticks()
+    flash = getattr(boss, "flash_timer", 0) > 0
+    phase = getattr(boss, "phase", 1)
+
+    # 1. Massive Toxic Puddle Drop Shadow
+    shadow_w = int(r * 2.3)
+    shadow_h = int(r * 1.1)
+    shadow_surf = pygame.Surface((shadow_w, shadow_h), pygame.SRCALPHA)
+    pygame.draw.ellipse(shadow_surf, (15, 20, 10, 120), (0, 0, shadow_w, shadow_h))
+    surface.blit(shadow_surf, (cx - shadow_w // 2, cy + int(r * 0.45)))
+
+    # 2. 6 Mechanical Spider-like Crawl Legs
+    for side in (-1, 1):
+        for leg_i in range(3):
+            leg_ang = (leg_i - 1) * 0.55 + (0 if side == 1 else math.pi)
+            stride = math.sin(ticks * 0.008 + leg_i * 1.2) * 6.0
+            knee_x = cx + math.cos(leg_ang) * (r * 0.9)
+            knee_y = cy + math.sin(leg_ang) * (r * 0.7) - 6
+            foot_x = cx + math.cos(leg_ang) * (r * 1.35 + stride)
+            foot_y = cy + math.sin(leg_ang) * (r * 1.05 + stride) + 12
+            pygame.draw.line(surface, (45, 38, 30), (cx, cy), (int(knee_x), int(knee_y)), 6)
+            pygame.draw.line(surface, (80, 65, 45), (int(knee_x), int(knee_y)), (int(foot_x), int(foot_y)), 5)
+            # Piston joint
+            pygame.draw.circle(surface, (140, 115, 75), (int(knee_x), int(knee_y)), 4)
+            pygame.draw.circle(surface, (40, 30, 25), (int(foot_x), int(foot_y)), 4)
+
+    # 3. Heavy Cylindrical Boiler Hull
+    hull_col = COLOR_WHITE if flash else ((175, 70, 45) if phase == 2 else (110, 62, 40))
+    hull_dark = (50, 32, 22)
+    pygame.draw.circle(surface, hull_dark, (cx, cy), int(r))
+    pygame.draw.circle(surface, hull_col, (cx, cy), int(r - 4))
+    
+    # Rusted plate seam lines and rivets
+    pygame.draw.line(surface, hull_dark, (cx - int(r * 0.8), cy), (cx + int(r * 0.8), cy), 3)
+    for rv in range(-int(r * 0.7), int(r * 0.7), 16):
+        pygame.draw.circle(surface, (190, 150, 90), (cx + rv, cy - 10), 2)
+        pygame.draw.circle(surface, (190, 150, 90), (cx + rv, cy + 10), 2)
+
+    # Toxic slime drips
+    pygame.draw.arc(surface, (90, 200, 40), (cx - 24, cy - 14, 48, 28), 0, math.pi, 3)
+
+    # 4. Central Toxic Furnace Maw / Incinerator Firebox
+    pulse = (math.sin(ticks * 0.012) + 1) * 0.5
+    fire_col = (int(140 + 100 * pulse), 40, 25) if phase == 2 else (int(80 + 60 * pulse), int(210 + 45 * pulse), 40)
+    core_r = int(r * 0.44)
+    pygame.draw.circle(surface, (25, 20, 18), (cx, cy), core_r + 4)
+    pygame.draw.circle(surface, fire_col, (cx, cy), core_r)
+    pygame.draw.circle(surface, (240, 255, 180), (cx, cy), int(core_r * 0.55))
+    # Heavy iron grate bars
+    for g_off in (-8, 0, 8):
+        pygame.draw.line(surface, (35, 28, 24), (cx + g_off, cy - core_r), (cx + g_off, cy + core_r), 3)
+
+    # 5. Twin Industrial Smokestacks / Exhaust Chimneys
+    for side in (-1, 1):
+        stack_x = cx + side * 22
+        stack_y = cy - int(r * 0.7)
+        pygame.draw.rect(surface, (40, 32, 28), (stack_x - 8, stack_y - 12, 16, 20), border_radius=3)
+        pygame.draw.rect(surface, (130, 95, 60), (stack_x - 9, stack_y - 14, 18, 5), border_radius=2)
+        # Chimney opening
+        pygame.draw.ellipse(surface, (15, 12, 10), (stack_x - 6, stack_y - 14, 12, 6))
+        # Spewing soot & green smog
+        smoke_col = (110, 180, 60, 120) if phase == 1 else (230, 80, 40, 140)
+        smk_surf = pygame.Surface((20, 20), pygame.SRCALPHA)
+        pygame.draw.circle(smk_surf, smoke_col, (10, 10), 8)
+        surface.blit(smk_surf, (stack_x - 10, stack_y - 24 + int(math.sin(ticks * 0.01 + side) * 3)))
+
+    # 6. Brass Pressure Gauges
+    for side in (-1, 1):
+        gx = cx + side * 28
+        gy = cy + 12
+        pygame.draw.circle(surface, COLOR_BRASS_HIGHLIGHT, (gx, gy), 6)
+        pygame.draw.circle(surface, COLOR_WHITE, (gx, gy), 4)
+        # Twitching needle
+        n_ang = ticks * 0.015 * side
+        pygame.draw.line(surface, (200, 20, 20), (gx, gy), (int(gx + math.cos(n_ang) * 4), int(gy + math.sin(n_ang) * 4)), 1)
+
+
+def draw_cyber_dispatcher_sprite(surface: pygame.Surface, screen_pos: tuple, boss):
+    """Draws Cyber Dispatcher: Sleek high-tech transit enforcer in matte carbon riot armor with electric arc-batons."""
+    cx, cy = int(screen_pos[0]), int(screen_pos[1])
+    r = boss.radius
+    fa = boss.facing_angle
+    cos_f = math.cos(fa)
+    sin_f = math.sin(fa)
+    perp_x = -sin_f
+    perp_y = cos_f
+    ticks = pygame.time.get_ticks()
+    flash = getattr(boss, "flash_timer", 0) > 0
+
+    # Drop shadow with cyan ambient under-glow
+    shadow_w = int(r * 2.1)
+    shadow_h = int(r * 0.95)
+    shadow_surf = pygame.Surface((shadow_w, shadow_h), pygame.SRCALPHA)
+    pygame.draw.ellipse(shadow_surf, (0, 0, 0, 95), (0, 0, shadow_w, shadow_h))
+    pygame.draw.ellipse(shadow_surf, (0, 220, 255, 35), (2, 2, shadow_w - 4, shadow_h - 4))
+    surface.blit(shadow_surf, (cx - shadow_w // 2, cy + int(r * 0.45)))
+
+    # Maglev boot thrusters
+    for s in (-1, 1):
+        bx = cx + int(perp_x * s * 10 - cos_f * 5)
+        by = cy + int(perp_y * s * 10 - sin_f * 5 + 13)
+        pygame.draw.rect(surface, (25, 30, 42), (bx - 5, by - 4, 10, 8), border_radius=2)
+        pygame.draw.rect(surface, (0, 240, 255), (bx - 3, by + 3, 6, 2))
+
+    # Matte carbon-fiber plate armor torso
+    suit_col = COLOR_WHITE if flash else (24, 34, 52)
+    pygame.draw.circle(surface, (12, 16, 26), (cx, cy), int(r * 0.82))
+    pygame.draw.circle(surface, suit_col, (cx, cy), int(r * 0.76))
+    
+    # Neon cyan LED conduit piping across chest
+    neon_pulse = (math.sin(ticks * 0.01) + 1) * 0.5
+    cyan_col = (int(30 + 30 * neon_pulse), int(220 + 35 * neon_pulse), 255)
+    pygame.draw.circle(surface, cyan_col, (cx, cy), int(r * 0.76), 2)
+    pygame.draw.line(surface, cyan_col, (cx - 8, cy - 8), (cx, cy + 4), 2)
+    pygame.draw.line(surface, cyan_col, (cx + 8, cy - 8), (cx, cy + 4), 2)
+
+    # Angular riot shoulder guards
+    for s in (-1, 1):
+        px = cx + perp_x * (s * 15)
+        py = cy + perp_y * (s * 15)
+        pygame.draw.circle(surface, (18, 25, 38), (int(px), int(py)), 7)
+        pygame.draw.circle(surface, cyan_col, (int(px), int(py)), 7, 1)
+
+    # Twin Arc-Batons held in hands
+    for s in (-1, 1):
+        hand_x = cx + cos_f * 14 + perp_x * (s * 14)
+        hand_y = cy + sin_f * 14 + perp_y * (s * 14)
+        b_ang = fa + s * 0.4
+        b_cos = math.cos(b_ang)
+        b_sin = math.sin(b_ang)
+        tip_x = hand_x + b_cos * 24
+        tip_y = hand_y + b_sin * 24
+        # Baton handle & shaft
+        pygame.draw.line(surface, (40, 48, 60), (int(hand_x), int(hand_y)), (int(tip_x), int(tip_y)), 5)
+        pygame.draw.line(surface, (0, 240, 255), (int(hand_x + b_cos * 8), int(hand_y + b_sin * 8)), (int(tip_x), int(tip_y)), 3)
+        # Crackling electric arc tip
+        pygame.draw.circle(surface, (180, 250, 255), (int(tip_x), int(tip_y)), 5)
+        pygame.draw.circle(surface, COLOR_WHITE, (int(tip_x), int(tip_y)), 2)
+        # Lightning spark discharge
+        spark_ang = ticks * 0.03 * s
+        spk_x = tip_x + math.cos(spark_ang) * 6
+        spk_y = tip_y + math.sin(spark_ang) * 6
+        pygame.draw.line(surface, (120, 255, 255), (int(tip_x), int(tip_y)), (int(spk_x), int(spk_y)), 2)
+
+    # Cyber Enforcer Helmet & Targeting HUD Visor
+    head_x = cx + cos_f * 7
+    head_y = cy + sin_f * 7 - 7
+    pygame.draw.circle(surface, (15, 20, 32), (int(head_x), int(head_y)), 10)
+    # Magenta & Cyan dual holographic HUD optics
+    v_col = (255, 40, 180) if (ticks // 250) % 2 == 0 else cyan_col
+    pygame.draw.rect(surface, v_col, (int(head_x - 6), int(head_y - 4), 12, 5), border_radius=1)
+    pygame.draw.line(surface, COLOR_WHITE, (int(head_x - 4), int(head_y - 2)), (int(head_x + 4), int(head_y - 2)), 1)
+
+
+def draw_traction_ai_core_sprite(surface: pygame.Surface, screen_pos: tuple, boss):
+    """Draws Traction AI Core: Octagonal brushed steel mainframe with rotating camera aperture eye and orbiting pylons."""
+    cx, cy = int(screen_pos[0]), int(screen_pos[1])
+    r = boss.radius
+    fa = boss.facing_angle
+    ticks = pygame.time.get_ticks()
+    flash = getattr(boss, "flash_timer", 0) > 0
+    phase = getattr(boss, "phase", 1)
+
+    # 1. Pulsing Drop Shadow with Maglev Glow
+    shadow_w = int(r * 2.3)
+    shadow_h = int(r * 1.05)
+    shadow_surf = pygame.Surface((shadow_w, shadow_h), pygame.SRCALPHA)
+    pygame.draw.ellipse(shadow_surf, (0, 0, 0, 110), (0, 0, shadow_w, shadow_h))
+    pygame.draw.ellipse(shadow_surf, (40, 220, 255, 45), (4, 4, shadow_w - 8, shadow_h - 8))
+    surface.blit(shadow_surf, (cx - shadow_w // 2, cy + int(r * 0.45)))
+
+    # 2. Orbiting Magnetic Capacitor Pylons (4 orbiting satellites)
+    pylon_count = 4
+    orbit_speed = 0.0025 if phase == 1 else 0.005
+    for p_idx in range(pylon_count):
+        p_ang = ticks * orbit_speed + (math.tau / pylon_count) * p_idx
+        p_dist = r * 1.25
+        px = cx + math.cos(p_ang) * p_dist
+        py = cy + math.sin(p_ang) * p_dist
+        
+        # Pylon body
+        pygame.draw.circle(surface, (18, 25, 40), (int(px), int(py)), 8)
+        pylon_glow = (255, 50, 180) if phase == 2 else (40, 240, 255)
+        pygame.draw.circle(surface, pylon_glow, (int(px), int(py)), 6, 2)
+        pygame.draw.circle(surface, COLOR_WHITE, (int(px), int(py)), 3)
+        # Power link line to core
+        pygame.draw.line(surface, pylon_glow, (int(px), int(py)), (cx, cy), 1)
+
+    # 3. Octagonal Mainframe Chassis
+    oct_pts = []
+    base_col = COLOR_WHITE if flash else (22, 32, 50)
+    for i in range(8):
+        ang = (math.tau / 8) * i + math.pi / 8
+        oct_pts.append((cx + math.cos(ang) * r, cy + math.sin(ang) * r))
+    pygame.draw.polygon(surface, (10, 14, 24), oct_pts)
+    pygame.draw.polygon(surface, base_col, oct_pts, 0)
+    pygame.draw.polygon(surface, (50, 180, 240), oct_pts, 3)
+
+    # Hexagonal circuit bus lines
+    for i in range(4):
+        ang1 = (math.tau / 8) * (i * 2)
+        ang2 = (math.tau / 8) * (i * 2 + 4)
+        p1 = (cx + math.cos(ang1) * (r * 0.75), cy + math.sin(ang1) * (r * 0.75))
+        p2 = (cx + math.cos(ang2) * (r * 0.75), cy + math.sin(ang2) * (r * 0.75))
+        pygame.draw.line(surface, (30, 140, 200), p1, p2, 1)
+
+    # 4. Central Aperture Optic Camera Eye (Tracking Player)
+    eye_r = int(r * 0.45)
+    pygame.draw.circle(surface, (12, 16, 25), (cx, cy), eye_r)
+    pygame.draw.circle(surface, (40, 220, 255), (cx, cy), eye_r, 2)
+
+    # Aperture iris blades
+    blade_count = 6
+    iris_rot = ticks * 0.003
+    for b in range(blade_count):
+        b_ang = iris_rot + (math.tau / blade_count) * b
+        bx1 = cx + math.cos(b_ang) * (eye_r * 0.85)
+        by1 = cy + math.sin(b_ang) * (eye_r * 0.85)
+        bx2 = cx + math.cos(b_ang + 0.6) * (eye_r * 0.35)
+        by2 = cy + math.sin(b_ang + 0.6) * (eye_r * 0.35)
+        pygame.draw.line(surface, (20, 45, 75), (int(bx1), int(by1)), (int(bx2), int(by2)), 2)
+
+    # Pupil tracking facing angle
+    pupil_offset = pygame.math.Vector2(math.cos(fa), math.sin(fa)) * 6.0
+    pupil_x = cx + pupil_offset.x
+    pupil_y = cy + pupil_offset.y
+    core_glow = (255, 40, 180) if phase == 2 else (0, 255, 240)
+    pygame.draw.circle(surface, core_glow, (int(pupil_x), int(pupil_y)), 9)
+    pygame.draw.circle(surface, COLOR_WHITE, (int(pupil_x), int(pupil_y)), 4)
+
+
+def draw_sub_zero_warden_sprite(surface: pygame.Surface, screen_pos: tuple, boss):
+    """Draws Sub-Zero Warden: Heavy cryogenic power-armor with frosted pauldrons and frost-breaker hammer."""
+    cx, cy = int(screen_pos[0]), int(screen_pos[1])
+    r = boss.radius
+    fa = boss.facing_angle
+    cos_f = math.cos(fa)
+    sin_f = math.sin(fa)
+    perp_x = -sin_f
+    perp_y = cos_f
+    ticks = pygame.time.get_ticks()
+    flash = getattr(boss, "flash_timer", 0) > 0
+
+    # Frozen frosted shadow
+    shadow_w = int(r * 2.2)
+    shadow_h = int(r * 0.95)
+    shadow_surf = pygame.Surface((shadow_w, shadow_h), pygame.SRCALPHA)
+    pygame.draw.ellipse(shadow_surf, (0, 0, 0, 90), (0, 0, shadow_w, shadow_h))
+    pygame.draw.ellipse(shadow_surf, (160, 230, 255, 40), (2, 2, shadow_w - 4, shadow_h - 4))
+    surface.blit(shadow_surf, (cx - shadow_w // 2, cy + int(r * 0.45)))
+
+    # Back-mounted liquid nitrogen canisters
+    for s in (-1, 1):
+        cx_tank = cx - cos_f * 14 + perp_x * (s * 13)
+        cy_tank = cy - sin_f * 14 + perp_y * (s * 13)
+        pygame.draw.rect(surface, (30, 48, 70), (int(cx_tank - 5), int(cy_tank - 8), 10, 16), border_radius=3)
+        pygame.draw.rect(surface, (140, 230, 255), (int(cx_tank - 3), int(cy_tank - 5), 6, 10), border_radius=1)
+        pygame.draw.circle(surface, COLOR_BRASS_HIGHLIGHT, (int(cx_tank), int(cy_tank - 9)), 3)
+
+    # Heavy Frosted Cobalt Armor Torso
+    suit_col = COLOR_WHITE if flash else (45, 80, 125)
+    pygame.draw.circle(surface, (20, 38, 62), (cx, cy), int(r * 0.85))
+    pygame.draw.circle(surface, suit_col, (cx, cy), int(r * 0.78))
+    # Frosted ice rim
+    pygame.draw.circle(surface, (180, 240, 255), (cx, cy), int(r * 0.78), 2)
+
+    # Jagged icicle pauldrons on shoulders
+    for s in (-1, 1):
+        px = cx + perp_x * (s * 18)
+        py = cy + perp_y * (s * 18)
+        pygame.draw.circle(surface, (60, 105, 155), (int(px), int(py)), 8)
+        # Icicle spikes
+        for ic in range(3):
+            ic_len = 6 + ic * 3
+            ic_ang = fa + math.pi + (s * 0.5) + (ic - 1) * 0.3
+            ix = px + math.cos(ic_ang) * ic_len
+            iy = py + math.sin(ic_ang) * ic_len
+            pygame.draw.line(surface, (210, 245, 255), (int(px), int(py)), (int(ix), int(iy)), 3)
+
+    # Colossal Pneumatic Frost-Breaker Warhammer
+    h_ang = fa + 0.45
+    h_cos = math.cos(h_ang)
+    h_sin = math.sin(h_ang)
+    h_perp_x = -h_sin
+    h_perp_y = h_cos
+    h_base_x = cx + cos_f * 12 + perp_x * 9
+    h_base_y = cy + sin_f * 12 + perp_y * 9
+    h_tip_x = h_base_x + h_cos * 36
+    h_tip_y = h_base_y + h_sin * 36
+
+    # Heavy steel shaft
+    pygame.draw.line(surface, (40, 50, 65), (int(h_base_x), int(h_base_y)), (int(h_tip_x), int(h_tip_y)), 7)
+    # Giant frost mallet head
+    m_w = 14
+    m_h = 20
+    m_p1 = (int(h_tip_x + h_perp_x * m_w), int(h_tip_y + h_perp_y * m_w))
+    m_p2 = (int(h_tip_x - h_perp_x * m_w), int(h_tip_y - h_perp_y * m_w))
+    m_p3 = (int(h_tip_x - h_cos * m_h - h_perp_x * m_w), int(h_tip_y - h_sin * m_h - h_perp_y * m_w))
+    m_p4 = (int(h_tip_x - h_cos * m_h + h_perp_x * m_w), int(h_tip_y - h_sin * m_h + h_perp_y * m_w))
+    pygame.draw.polygon(surface, (25, 45, 75), [m_p1, m_p2, m_p3, m_p4])
+    pygame.draw.polygon(surface, (170, 235, 255), [m_p1, m_p2, m_p3, m_p4], 2)
+    # Cold vapor glow on hammer head
+    pygame.draw.circle(surface, (200, 245, 255), (int(h_tip_x), int(h_tip_y)), 6)
+
+    # Helm & Cold Blue Glacial Visor
+    head_x = cx + cos_f * 7
+    head_y = cy + sin_f * 7 - 7
+    pygame.draw.circle(surface, (25, 42, 68), (int(head_x), int(head_y)), 11)
+    pygame.draw.circle(surface, (160, 230, 255), (int(head_x), int(head_y)), 11, 2)
+    # Piercing glacial blue eye slits
+    pygame.draw.circle(surface, (120, 240, 255), (int(head_x + cos_f * 3 - perp_x * 3), int(head_y + sin_f * 3 - perp_y * 3)), 3)
+    pygame.draw.circle(surface, (120, 240, 255), (int(head_x + cos_f * 3 + perp_x * 3), int(head_y + sin_f * 3 + perp_y * 3)), 3)
+    pygame.draw.circle(surface, COLOR_WHITE, (int(head_x + cos_f * 3), int(head_y + sin_f * 3)), 2)
+
+
+def draw_cryo_turbine_engine_sprite(surface: pygame.Surface, screen_pos: tuple, boss):
+    """Draws Cryo-Turbine Engine: Colossal dual-rotor jet turbine housing with spinning blades and deep azure vortex."""
+    cx, cy = int(screen_pos[0]), int(screen_pos[1])
+    r = boss.radius
+    ticks = pygame.time.get_ticks()
+    flash = getattr(boss, "flash_timer", 0) > 0
+    phase = getattr(boss, "phase", 1)
+
+    # 1. Glacial Frost Shadow
+    shadow_w = int(r * 2.3)
+    shadow_h = int(r * 1.1)
+    shadow_surf = pygame.Surface((shadow_w, shadow_h), pygame.SRCALPHA)
+    pygame.draw.ellipse(shadow_surf, (0, 0, 0, 110), (0, 0, shadow_w, shadow_h))
+    pygame.draw.ellipse(shadow_surf, (140, 220, 255, 50), (4, 4, shadow_w - 8, shadow_h - 8))
+    surface.blit(shadow_surf, (cx - shadow_w // 2, cy + int(r * 0.45)))
+
+    # 2. Side Exhaust Ports blasting freezing vapor
+    for side in (-1, 1):
+        ex_x = cx + side * int(r * 0.72)
+        ex_y = cy - int(r * 0.45)
+        pygame.draw.circle(surface, (25, 42, 65), (ex_x, ex_y), 15)
+        pygame.draw.circle(surface, (140, 225, 255), (ex_x, ex_y), 13, 3)
+        pygame.draw.circle(surface, (200, 245, 255), (ex_x, ex_y), 6)
+
+    # 3. Heavy Titanium Cowling Chassis
+    hull_col = COLOR_WHITE if flash else ((50, 120, 190) if phase == 1 else (30, 160, 240))
+    pygame.draw.circle(surface, (18, 30, 48), (cx, cy), r)
+    pygame.draw.circle(surface, hull_col, (cx, cy), r - 4)
+    # Frost crystal rim patterns
+    pygame.draw.circle(surface, (210, 248, 255), (cx, cy), r - 4, 3)
+
+    # 4. Spinning Turbine Intake Fan Blades (Animated Rotation)
+    blade_count = 10
+    blade_speed = 0.015 if phase == 1 else 0.03
+    rot_ang = ticks * blade_speed
+    hub_r = int(r * 0.35)
+    intake_r = int(r * 0.78)
+
+    # Turbine intake cowl ring
+    pygame.draw.circle(surface, (15, 22, 35), (cx, cy), intake_r)
+
+    for b in range(blade_count):
+        b_ang = rot_ang + (math.tau / blade_count) * b
+        b_cos = math.cos(b_ang)
+        b_sin = math.sin(b_ang)
+        b_perp_x = -b_sin
+        b_perp_y = b_cos
+        
+        p1 = (cx + b_cos * hub_r, cy + b_sin * hub_r)
+        p2 = (cx + b_cos * intake_r + b_perp_x * 8, cy + b_sin * intake_r + b_perp_y * 8)
+        p3 = (cx + b_cos * intake_r, cy + b_sin * intake_r)
+        pygame.draw.polygon(surface, (100, 160, 215), [p1, p2, p3])
+        pygame.draw.polygon(surface, (190, 235, 255), [p1, p2, p3], 1)
+
+    # 5. Supercooled Azure Vortex Center Core
+    pulse = (math.sin(ticks * 0.012) + 1) * 0.5
+    core_col = (int(30 + 30 * pulse), int(210 + 45 * pulse), 255)
+    pygame.draw.circle(surface, (10, 18, 30), (cx, cy), hub_r + 2)
+    pygame.draw.circle(surface, core_col, (cx, cy), hub_r)
+    pygame.draw.circle(surface, COLOR_WHITE, (cx, cy), int(hub_r * 0.45))
+
+
+def draw_ash_pyromancer_sprite(surface: pygame.Surface, screen_pos: tuple, boss):
+    """Draws Ash Pyromancer: Obsidian plate armor over charred brimstone robes with twin flamethrowers."""
+    cx, cy = int(screen_pos[0]), int(screen_pos[1])
+    r = boss.radius
+    fa = boss.facing_angle
+    cos_f = math.cos(fa)
+    sin_f = math.sin(fa)
+    perp_x = -sin_f
+    perp_y = cos_f
+    ticks = pygame.time.get_ticks()
+    flash = getattr(boss, "flash_timer", 0) > 0
+
+    # Fiery ember drop shadow
+    shadow_w = int(r * 2.1)
+    shadow_h = int(r * 0.95)
+    shadow_surf = pygame.Surface((shadow_w, shadow_h), pygame.SRCALPHA)
+    pygame.draw.ellipse(shadow_surf, (0, 0, 0, 95), (0, 0, shadow_w, shadow_h))
+    pygame.draw.ellipse(shadow_surf, (255, 90, 20, 35), (2, 2, shadow_w - 4, shadow_h - 4))
+    surface.blit(shadow_surf, (cx - shadow_w // 2, cy + int(r * 0.45)))
+
+    # Back-mounted pressurized fuel sphere
+    tank_x = cx - cos_f * 13
+    tank_y = cy - sin_f * 13
+    pygame.draw.circle(surface, (40, 22, 18), (int(tank_x), int(tank_y)), 12)
+    pygame.draw.circle(surface, COLOR_BRASS_HIGHLIGHT, (int(tank_x), int(tank_y)), 10)
+    pygame.draw.circle(surface, (255, 120, 30), (int(tank_x), int(tank_y)), 6)
+
+    # Charred Robes & Obsidian Breastplate
+    body_col = COLOR_WHITE if flash else (32, 22, 22)
+    robe_col = (135, 35, 25)
+    pygame.draw.circle(surface, robe_col, (cx, cy), int(r * 0.85))
+    pygame.draw.circle(surface, body_col, (cx, cy), int(r * 0.75))
+    
+    # Glowing magma chest cracks
+    pulse = (math.sin(ticks * 0.015) + 1) * 0.5
+    magma_col = (255, int(130 + 80 * pulse), 30)
+    pygame.draw.line(surface, magma_col, (cx - 7, cy - 6), (cx + 2, cy + 5), 3)
+    pygame.draw.line(surface, magma_col, (cx + 6, cy - 8), (cx + 1, cy + 2), 2)
+    pygame.draw.circle(surface, (255, 230, 100), (cx + 1, cy), 3)
+
+    # Twin heavy arm flamethrower nozzles
+    for s in (-1, 1):
+        hand_x = cx + cos_f * 15 + perp_x * (s * 15)
+        hand_y = cy + sin_f * 15 + perp_y * (s * 15)
+        tip_x = hand_x + cos_f * 18
+        tip_y = hand_y + sin_f * 18
+        
+        # Heavy nozzle cylinder
+        pygame.draw.line(surface, (50, 45, 42), (int(hand_x), int(hand_y)), (int(tip_x), int(tip_y)), 6)
+        pygame.draw.line(surface, COLOR_BRASS, (int(hand_x + cos_f * 4), int(hand_y + sin_f * 4)), (int(tip_x), int(tip_y)), 4)
+        # Pilot light flame
+        pilot_r = 4 + int(3 * pulse)
+        pygame.draw.circle(surface, (255, 90, 20), (int(tip_x + cos_f * 3), int(tip_y + sin_f * 3)), pilot_r)
+        pygame.draw.circle(surface, COLOR_CRIT_YELLOW, (int(tip_x + cos_f * 2), int(tip_y + sin_f * 2)), max(2, pilot_r - 2))
+
+    # Horned Furnace Helm
+    head_x = cx + cos_f * 7
+    head_y = cy + sin_f * 7 - 7
+    pygame.draw.circle(surface, (22, 18, 16), (int(head_x), int(head_y)), 10)
+    pygame.draw.circle(surface, (255, 140, 40), (int(head_x), int(head_y)), 10, 2)
+    # Crown horns
+    for s in (-1, 1):
+        horn_x = head_x - cos_f * 4 + perp_x * (s * 9)
+        horn_y = head_y - sin_f * 4 + perp_y * (s * 9) - 6
+        pygame.draw.line(surface, (45, 35, 30), (int(head_x), int(head_y)), (int(horn_x), int(horn_y)), 3)
+        pygame.draw.circle(surface, magma_col, (int(horn_x), int(horn_y)), 2)
+    # Blazing eye slits
+    pygame.draw.circle(surface, (255, 210, 60), (int(head_x + cos_f * 3), int(head_y + sin_f * 3)), 4)
+
+
+def draw_iron_leviathan_sprite(surface: pygame.Surface, screen_pos: tuple, boss):
+    """Draws The Iron Leviathan: The ultimate apocalyptic locomotive war-machine with triple artillery and roaring magma heart."""
+    cx, cy = int(screen_pos[0]), int(screen_pos[1])
+    r = boss.radius
+    fa = boss.facing_angle
+    cos_f = math.cos(fa)
+    sin_f = math.sin(fa)
+    perp_x = -sin_f
+    perp_y = cos_f
+    ticks = pygame.time.get_ticks()
+    flash = getattr(boss, "flash_timer", 0) > 0
+    phase = getattr(boss, "phase", 1)
+
+    # 1. Colossal Volcanic Drop Shadow
+    shadow_w = int(r * 2.4)
+    shadow_h = int(r * 1.15)
+    shadow_surf = pygame.Surface((shadow_w, shadow_h), pygame.SRCALPHA)
+    pygame.draw.ellipse(shadow_surf, (0, 0, 0, 130), (0, 0, shadow_w, shadow_h))
+    pygame.draw.ellipse(shadow_surf, (255, 60, 10, 45), (4, 4, shadow_w - 8, shadow_h - 8))
+    surface.blit(shadow_surf, (cx - shadow_w // 2, cy + int(r * 0.45)))
+
+    # 2. Dreadnought Locomotive Cowcatcher Prow (Heavy triangular steel jaws)
+    prow_tip = (int(cx + cos_f * (r + 14)), int(cy + sin_f * (r + 14)))
+    prow_l = (int(cx + cos_f * (r - 8) + perp_x * 32), int(cy + sin_f * (r - 8) + perp_y * 32))
+    prow_r = (int(cx + cos_f * (r - 8) - perp_x * 32), int(cy + sin_f * (r - 8) - perp_y * 32))
+    pygame.draw.polygon(surface, (22, 18, 18), [prow_tip, prow_l, prow_r])
+    pygame.draw.polygon(surface, COLOR_BRASS_HIGHLIGHT, [prow_tip, prow_l, prow_r], 3)
+    # Grinding steel teeth on cowcatcher
+    for t_idx in (-20, 0, 20):
+        t_x = cx + cos_f * (r + 4) + perp_x * t_idx
+        t_y = cy + sin_f * (r + 4) + perp_y * t_idx
+        pygame.draw.circle(surface, (190, 180, 170), (int(t_x), int(t_y)), 3)
+
+    # 3. Heavy Iron Hull Armor Plating
+    hull_col = COLOR_WHITE if flash else (28, 24, 24)
+    pygame.draw.circle(surface, (15, 12, 12), (cx, cy), r)
+    pygame.draw.circle(surface, hull_col, (cx, cy), r - 5)
+    # Brass trim ring with studded rivets
+    pygame.draw.circle(surface, COLOR_BRASS, (cx, cy), r - 5, 4)
+    for rv_ang in range(0, 360, 30):
+        rad = math.radians(rv_ang)
+        rx = cx + math.cos(rad) * (r - 9)
+        ry = cy + math.sin(rad) * (r - 9)
+        pygame.draw.circle(surface, COLOR_BRASS_HIGHLIGHT, (int(rx), int(ry)), 2)
+
+    # 4. Roaring White-Hot Magma Furnace Heart (Central Firebox Maw)
+    fire_pulse = (math.sin(ticks * 0.016) + 1) * 0.5
+    magma_r = int(r * 0.46)
+    pygame.draw.circle(surface, (20, 12, 10), (cx, cy), magma_r + 4)
+    magma_col = (255, int(100 + 90 * fire_pulse), 20)
+    pygame.draw.circle(surface, magma_col, (cx, cy), magma_r)
+    pygame.draw.circle(surface, (255, 235, 100), (cx, cy), int(magma_r * 0.65))
+    pygame.draw.circle(surface, COLOR_WHITE, (cx, cy), int(magma_r * 0.35))
+    # Criss-cross heavy iron firebox grate
+    pygame.draw.line(surface, (30, 20, 15), (cx - magma_r, cy), (cx + magma_r, cy), 3)
+    pygame.draw.line(surface, (30, 20, 15), (cx, cy - magma_r), (cx, cy + magma_r), 3)
+
+    # 5. Dorsal Triple Artillery Cannon Turret Array (Pointing menacingly)
+    cannon_offsets = [(-16, 0.95), (0, 1.15), (16, 0.95)]
+    for c_perp, c_mult in cannon_offsets:
+        c_base_x = cx - cos_f * 10 + perp_x * c_perp
+        c_base_y = cy - sin_f * 10 + perp_y * c_perp
+        c_end_x = c_base_x + cos_f * (28 * c_mult)
+        c_end_y = c_base_y + sin_f * (28 * c_mult)
+        # Heavy gun barrel
+        pygame.draw.line(surface, (20, 18, 18), (int(c_base_x), int(c_base_y)), (int(c_end_x), int(c_end_y)), 7)
+        pygame.draw.line(surface, COLOR_STEEL_LIGHT, (int(c_base_x), int(c_base_y)), (int(c_end_x), int(c_end_y)), 3)
+        # Brass muzzle flare ring
+        pygame.draw.circle(surface, COLOR_BRASS_HIGHLIGHT, (int(c_end_x), int(c_end_y)), 5, 2)
+        pygame.draw.circle(surface, (10, 8, 8), (int(c_end_x), int(c_end_y)), 3)
+
+    # 6. Twin High-Intensity Forward Searchlights
+    for s in (-1, 1):
+        light_x = cx + cos_f * (r - 4) + perp_x * (s * 22)
+        light_y = cy + sin_f * (r - 4) + perp_y * (s * 22)
+        pygame.draw.circle(surface, COLOR_BRASS_HIGHLIGHT, (int(light_x), int(light_y)), 7)
+        pygame.draw.circle(surface, COLOR_CRIT_YELLOW, (int(light_x), int(light_y)), 5)
+        pygame.draw.circle(surface, COLOR_WHITE, (int(light_x), int(light_y)), 3)
+
 

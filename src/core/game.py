@@ -15,6 +15,7 @@ from src.ui.hub_station import HubStation
 from src.entities.player import Player
 from src.level.car_generator import RunManager
 from src.combat.boons import get_random_boon_choices
+from src.core.progression import ProgressionManager
 
 class Game:
     """Central engine managing all subsystems, game states, and loop execution."""
@@ -25,7 +26,7 @@ class Game:
     STATE_GAME_OVER = "game_over"
     STATE_VICTORY = "victory"
 
-    def __init__(self, headless: bool = False):
+    def __init__(self, headless: bool = False, progression: ProgressionManager = None):
         self.headless = headless
         self.running = True
         self.state = self.STATE_HUB
@@ -46,7 +47,8 @@ class Game:
         self.audio = audio
         self.hud = HUD()
         self.upgrade_menu = UpgradeMenu()
-        self.hub_station = HubStation()
+        self.progression = progression or ProgressionManager()
+        self.hub_station = HubStation(self.progression)
 
         # Gameplay entities & progression
         self.player = None
@@ -60,23 +62,35 @@ class Game:
         
         # Fonts for overlays
         pygame.font.init()
-        self.font_overlay_title = pygame.font.SysFont("Helvetica, Arial, sans-serif", 42, bold=True)
-        self.font_overlay_sub = pygame.font.SysFont("Helvetica, Arial, sans-serif", 18)
-        self.font_overlay_stat = pygame.font.SysFont("Helvetica, Arial, sans-serif", 15, bold=True)
-        self.font_overlay_btn = pygame.font.SysFont("Helvetica, Arial, sans-serif", 18, bold=True)
+        self.font_overlay_title = pygame.font.SysFont("Helvetica, Arial, sans-serif", 38, bold=True)
+        self.font_overlay_sub = pygame.font.SysFont("Helvetica, Arial, sans-serif", 17)
+        self.font_overlay_stat = pygame.font.SysFont("Helvetica, Arial, sans-serif", 14, bold=True)
+        self.font_overlay_btn = pygame.font.SysFont("Helvetica, Arial, sans-serif", 16, bold=True)
 
         # Run statistics & Victory flow
         self.run_start_ticks = 0
         self.run_duration_sec = 0.0
         self.enemies_killed = 0
         self.damage_dealt = 0
+        self.earned_xp = 0
+        self.earned_scrap = 0
+        self.newly_unlocked_stage = None
         self.victory_transition_timer = 0.0
-        self.return_button_rect = pygame.Rect(SCREEN_WIDTH // 2 - 160, SCREEN_HEIGHT - 110, 320, 48)
+        self.return_button_rect = pygame.Rect(SCREEN_WIDTH // 2 - 180, SCREEN_HEIGHT - 110, 360, 48)
+        self.overlay_input_delay = 0.0
+
+    def return_to_hub(self):
+        """Cleanly transition from Game Over / Victory / Pause back to Grand Central Terminal Hub."""
+        self.state = self.STATE_HUB
+        self.overlay_input_delay = 0.0
+        self.hub_station.reset_player()
+        self.audio.play('shoot')
+        pygame.event.clear()
 
     def start_new_run(self, route_id: str, starter_weapon):
         """Initialize a new train departure run."""
         self.input_handler = InputHandler()
-        self.run_manager = RunManager(route_id)
+        self.run_manager = RunManager(route_id, loop_count=self.progression.loop_count)
         self.train_car = self.run_manager.create_current_car()
         
         # Reset run metrics
@@ -84,12 +98,18 @@ class Game:
         self.run_duration_sec = 0.0
         self.enemies_killed = 0
         self.damage_dealt = 0
+        self.earned_xp = 0
+        self.earned_scrap = 0
+        self.newly_unlocked_stage = None
         self.victory_transition_timer = 0.0
+        self.progression.total_runs += 1
+        self.progression.save()
 
         # Setup player at left entrance of caboose
         start_y = (self.train_car.top_wall_y + self.train_car.bottom_wall_y) // 2
         self.player = Player(120, start_y)
         self.player.equip_weapon(starter_weapon)
+        self.progression.apply_perks_to_player(self.player)
 
         # Clear active objects
         self.projectiles.clear()
@@ -105,6 +125,12 @@ class Game:
 
     def load_next_train_car(self):
         """Advance player through the bulkhead door into the next train car."""
+        # Grant room secured XP & Scrap
+        self.progression.gain_xp(25)
+        self.earned_xp += 25
+        self.progression.gain_scrap(3)
+        self.earned_scrap += 3
+
         has_next = self.run_manager.advance_to_next_car()
         if not has_next:
             # Won the game!
@@ -161,17 +187,17 @@ class Game:
                     self.state = self.STATE_PLAYING
 
         elif self.state in (self.STATE_GAME_OVER, self.STATE_VICTORY):
+            if self.overlay_input_delay > 0.0:
+                return True
             for event in events:
                 if event.type == pygame.KEYDOWN:
-                    if event.key in (pygame.K_r, pygame.K_SPACE, pygame.K_RETURN, pygame.K_KP_ENTER):
-                        self.state = self.STATE_HUB
-                        self.audio.play('shoot')
-                    elif event.key == pygame.K_ESCAPE:
-                        self.state = self.STATE_HUB
+                    if event.key in (pygame.K_r, pygame.K_SPACE, pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_e, pygame.K_ESCAPE):
+                        self.return_to_hub()
+                        return True
                 elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     if self.return_button_rect.collidepoint(event.pos):
-                        self.state = self.STATE_HUB
-                        self.audio.play('shoot')
+                        self.return_to_hub()
+                        return True
 
         return True
 
@@ -189,6 +215,7 @@ class Game:
             # Check player death
             if not self.player.is_alive():
                 self.state = self.STATE_GAME_OVER
+                self.overlay_input_delay = 0.5
                 self.audio.play('explosion')
                 return
 
@@ -200,8 +227,19 @@ class Game:
             # Update enemies
             for enemy in self.enemies:
                 enemy.update(dt, self.player, self.train_car, self)
-            # Filter dead enemies
-            self.enemies = [e for e in self.enemies if e.is_alive()]
+            # Filter dead enemies and grant XP / Scrap
+            alive_enemies = []
+            for e in self.enemies:
+                if e.is_alive():
+                    alive_enemies.append(e)
+                else:
+                    self.enemies_killed += 1
+                    base_xp = 75 if getattr(e, "is_miniboss", False) else (15 if getattr(e, "is_elite", False) else 5)
+                    self.progression.gain_xp(base_xp)
+                    self.earned_xp += base_xp
+                    self.progression.gain_scrap(1)
+                    self.earned_scrap += 1
+            self.enemies = alive_enemies
 
             # Check if train car is cleared!
             if len(self.enemies) == 0:
@@ -212,10 +250,17 @@ class Game:
                         self.audio.play('explosion')
                         self.audio.play('boon')
                         self.camera.add_trauma(0.8)
+                        self.progression.gain_xp(200)
+                        self.earned_xp += 200
+                        self.progression.gain_scrap(50)
+                        self.earned_scrap += 50
+                        self.progression.total_bosses_slain += 1
+                        self.newly_unlocked_stage = self.progression.advance_track_on_victory()
                     else:
                         self.victory_transition_timer -= dt
                         if self.victory_transition_timer <= 0:
                             self.state = self.STATE_VICTORY
+                            self.overlay_input_delay = 0.5
                 elif not self.train_car.exit_unlocked:
                     self.train_car.unlock_exit(self)
 
@@ -314,6 +359,10 @@ class Game:
                 self.audio.play('boon')
                 self.state = self.STATE_PLAYING
 
+        elif self.state in (self.STATE_GAME_OVER, self.STATE_VICTORY):
+            if self.overlay_input_delay > 0.0:
+                self.overlay_input_delay = max(0.0, self.overlay_input_delay - dt)
+
     def render(self):
         """Draw everything based on current state."""
         self.screen.fill(COLOR_BG)
@@ -409,91 +458,127 @@ class Game:
         self.screen.blit(stats_text, stats_text.get_rect(center=(SCREEN_WIDTH // 2, card_rect.top + 145)))
 
         # Return Button
+        btn_w, btn_h = 360, 48
+        self.return_button_rect = pygame.Rect((SCREEN_WIDTH - btn_w) // 2, card_rect.bottom - 75, btn_w, btn_h)
         btn_rect = self.return_button_rect
         pygame.draw.rect(self.screen, (160, 40, 40), btn_rect, border_radius=8)
         pygame.draw.rect(self.screen, (240, 100, 100), btn_rect, 2, border_radius=8)
-        btn_text = self.font_overlay_btn.render("RETURN TO STATION", True, COLOR_WHITE)
+        btn_text = self.font_overlay_btn.render("RETURN TO GRAND CENTRAL HUB", True, COLOR_WHITE)
         self.screen.blit(btn_text, btn_text.get_rect(center=btn_rect.center))
 
-        key_prompt = self.font_overlay_stat.render("Click or press [SPACE] / [ENTER] / [R]", True, (200, 180, 180))
-        self.screen.blit(key_prompt, key_prompt.get_rect(center=(btn_rect.centerx, btn_rect.bottom + 18)))
+        key_prompt = self.font_overlay_stat.render("Click or press [SPACE] / [E] / [ENTER] / [R]", True, (200, 180, 180))
+        self.screen.blit(key_prompt, key_prompt.get_rect(center=(btn_rect.centerx, btn_rect.bottom + 16)))
 
     def _draw_victory_overlay(self):
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((8, 18, 14, 235))
+        overlay.fill((8, 18, 14, 238))
         self.screen.blit(overlay, (0, 0))
 
-        card_w, card_h = 760, 500
-        card_rect = pygame.Rect((SCREEN_WIDTH - card_w) // 2, (SCREEN_HEIGHT - card_h) // 2 - 35, card_w, card_h)
+        card_w, card_h = 860, 560
+        card_rect = pygame.Rect((SCREEN_WIDTH - card_w) // 2, (SCREEN_HEIGHT - card_h) // 2 - 10, card_w, card_h)
         pygame.draw.rect(self.screen, (15, 24, 20), card_rect, border_radius=12)
         pygame.draw.rect(self.screen, COLOR_BRASS, card_rect, 3, border_radius=12)
 
         # Title Banner
         v_text = self.font_overlay_title.render("=== LOCOMOTIVE LIBERATED! ===", True, COLOR_BRASS_HIGHLIGHT)
-        v_rect = v_text.get_rect(center=(SCREEN_WIDTH // 2, card_rect.top + 45))
+        v_rect = v_text.get_rect(center=(SCREEN_WIDTH // 2, card_rect.top + 38))
         self.screen.blit(v_text, v_rect)
 
-        v_sub = self.font_overlay_sub.render("The Conductor is defeated. The runaway train safely grinds to a halt!", True, COLOR_WHITE)
-        self.screen.blit(v_sub, v_sub.get_rect(center=(SCREEN_WIDTH // 2, card_rect.top + 85)))
+        sub_msg = f"{self.run_manager.route_data['name']} has been secured! Runaway train brought to a halt."
+        v_sub = self.font_overlay_sub.render(sub_msg, True, COLOR_WHITE)
+        self.screen.blit(v_sub, v_sub.get_rect(center=(SCREEN_WIDTH // 2, card_rect.top + 72)))
+
+        # New Stage Unlocked Callout Banner
+        banner_offset = 0
+        if self.newly_unlocked_stage:
+            from src.level.car_generator import TRAIN_ROUTES
+            if isinstance(self.newly_unlocked_stage, dict):
+                info = self.newly_unlocked_stage
+                if info.get("new_loop"):
+                    msg = f"★ EXPEDITION CYCLE COMPLETED! ADVANCING TO {info['display_name']} (LOOP {info['loop_count'] + 1}) ★"
+                else:
+                    active_name = TRAIN_ROUTES.get(info['active_route'], {}).get("name", info['active_route'])
+                    msg = f"★ TRACK {info['previous_track_idx'] + 1} DEPARTED! NEXT: {info['display_name']} ({active_name.upper()}) ★"
+            else:
+                new_name = TRAIN_ROUTES.get(self.newly_unlocked_stage, {}).get("name", self.newly_unlocked_stage)
+                msg = f"★ NEW TRACK OPENED AT DOCKING BAY: {new_name.upper()}! ★"
+
+            unl_rect = pygame.Rect(card_rect.left + 40, card_rect.top + 94, card_w - 80, 28)
+            pygame.draw.rect(self.screen, (32, 60, 40), unl_rect, border_radius=4)
+            pygame.draw.rect(self.screen, (100, 240, 150), unl_rect, 1, border_radius=4)
+            unl_txt = self.font_overlay_stat.render(msg, True, (130, 255, 180))
+            self.screen.blit(unl_txt, unl_txt.get_rect(center=unl_rect.center))
+            banner_offset = 32
 
         # Run Statistics Box
-        stats_rect = pygame.Rect(card_rect.left + 40, card_rect.top + 115, card_w - 80, 115)
+        stats_top = card_rect.top + 105 + banner_offset
+        stats_rect = pygame.Rect(card_rect.left + 40, stats_top, card_w - 80, 105)
         pygame.draw.rect(self.screen, (22, 34, 28), stats_rect, border_radius=8)
         pygame.draw.rect(self.screen, (40, 70, 55), stats_rect, 1, border_radius=8)
 
-        # 4 Stat Columns
         m = int(self.run_duration_sec // 60)
         s = int(self.run_duration_sec % 60)
         time_str = f"{m:02d}:{s:02d}"
+        
+        route_lbl = self.run_manager.route_data['name']
+        if len(route_lbl) > 17:
+            route_lbl = route_lbl[:15] + ".."
         stat_items = [
-            ("ROUTE", f"{self.run_manager.route_data['name']}"),
+            ("ROUTE", route_lbl),
             ("CARS SECURED", f"{self.run_manager.current_car_index + 1} / {self.run_manager.total_cars}"),
-            ("RUN TIME", time_str),
-            ("ENEMIES SLAIN", f"{self.enemies_killed} Foes"),
+            ("EXP EARNED", f"+{self.earned_xp} XP"),
+            ("SCRAP BANKED", f"+{self.earned_scrap} Scrap"),
         ]
         col_w = stats_rect.width // len(stat_items)
         for i, (label, val) in enumerate(stat_items):
             cx = stats_rect.left + i * col_w + col_w // 2
             lbl_surf = self.font_overlay_stat.render(label, True, COLOR_BRASS)
             val_surf = self.font_overlay_btn.render(val, True, COLOR_WHITE)
-            self.screen.blit(lbl_surf, lbl_surf.get_rect(center=(cx, stats_rect.top + 32)))
-            self.screen.blit(val_surf, val_surf.get_rect(center=(cx, stats_rect.top + 72)))
+            self.screen.blit(lbl_surf, lbl_surf.get_rect(center=(cx, stats_top + 28)))
+            self.screen.blit(val_surf, val_surf.get_rect(center=(cx, stats_top + 65)))
 
         # Final Arsenal & Boons
-        loadout_y = card_rect.top + 250
+        loadout_y = stats_top + 125
         wpn_name = self.player.weapon.name if self.player and self.player.weapon else "None"
-        wpn_lbl = self.font_overlay_sub.render(f"Final Weapon: {wpn_name}", True, COLOR_BRASS_HIGHLIGHT)
+        wpn_lbl = self.font_overlay_sub.render(f"Arsenal Weapon: {wpn_name}  |  Enemies Slain: {self.enemies_killed}", True, COLOR_BRASS_HIGHLIGHT)
         self.screen.blit(wpn_lbl, (card_rect.left + 40, loadout_y))
 
-        # Boons summary badges
-        boon_y = loadout_y + 32
+        # Boons summary badges with multi-line wrapping
+        boon_y = loadout_y + 30
+        cur_bx = card_rect.left + 40
+        max_rx = card_rect.right - 40
         if self.player and self.player.boons:
-            bx = card_rect.left + 40
-            for boon in self.player.boons[:5]:
+            for boon in self.player.boons:
                 tier_str = f"T{boon.level}/{boon.max_level}"
                 b_text = f"{boon.name} [{tier_str}]"
                 b_surf = self.font_overlay_stat.render(b_text, True, COLOR_WHITE)
-                b_bg = pygame.Rect(bx, boon_y, b_surf.get_width() + 14, 24)
+                badge_w = b_surf.get_width() + 14
+                if cur_bx + badge_w > max_rx:
+                    cur_bx = card_rect.left + 40
+                    boon_y += 28
+                b_bg = pygame.Rect(cur_bx, boon_y, badge_w, 24)
                 pygame.draw.rect(self.screen, (30, 48, 38), b_bg, border_radius=4)
                 pygame.draw.rect(self.screen, COLOR_BRASS, b_bg, 1, border_radius=4)
-                self.screen.blit(b_surf, (bx + 7, boon_y + 4))
-                bx += b_bg.width + 10
+                self.screen.blit(b_surf, (cur_bx + 7, boon_y + 4))
+                cur_bx += badge_w + 8
         else:
             no_b = self.font_overlay_stat.render("No boons equipped", True, (160, 160, 160))
             self.screen.blit(no_b, (card_rect.left + 40, boon_y))
 
-        # Interactive Return Button
+        # Return Button (Inside card bounds at bottom)
         pulse = (math.sin(pygame.time.get_ticks() * 0.008) + 1) * 0.5
+        btn_w, btn_h = 380, 48
+        self.return_button_rect = pygame.Rect((SCREEN_WIDTH - btn_w) // 2, card_rect.bottom - 72, btn_w, btn_h)
         btn_rect = self.return_button_rect
         btn_color = (int(35 + 25 * pulse), int(120 + 35 * pulse), int(70 + 20 * pulse))
         pygame.draw.rect(self.screen, btn_color, btn_rect, border_radius=8)
         pygame.draw.rect(self.screen, COLOR_BRASS_HIGHLIGHT, btn_rect, 2, border_radius=8)
         
-        btn_text = self.font_overlay_btn.render("RETURN TO STATION", True, COLOR_WHITE)
+        btn_text = self.font_overlay_btn.render("RETURN TO GRAND CENTRAL HUB", True, COLOR_WHITE)
         self.screen.blit(btn_text, btn_text.get_rect(center=btn_rect.center))
 
-        key_prompt = self.font_overlay_stat.render("Click or press [SPACE] / [ENTER] / [R]", True, (180, 225, 195))
-        self.screen.blit(key_prompt, key_prompt.get_rect(center=(btn_rect.centerx, btn_rect.bottom + 18)))
+        key_prompt = self.font_overlay_stat.render("Click or press [SPACE] / [E] / [ENTER] / [R] to return & bank rewards", True, (170, 215, 185))
+        self.screen.blit(key_prompt, key_prompt.get_rect(center=(btn_rect.centerx, btn_rect.bottom + 14)))
 
     def run(self):
         """Main game loop."""

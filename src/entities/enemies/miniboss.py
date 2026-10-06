@@ -85,14 +85,18 @@ class ChiefInspectorMiniBoss(BaseEnemy):
         # Cooldown timer between special attacks
         self.attack_timer -= dt
         if self.attack_timer <= 0:
-            # Choose attack: Baton rush if close, Ticket Barrage if at medium/long range
-            if dist < 220:
+            choice = random.choice(["rush", "barrage", "whistle", "crossfire"])
+            if choice == "rush" and dist < 260:
                 self._start_rush(to_player.normalize() if dist > 0 else pygame.math.Vector2(1, 0))
+            elif choice == "whistle":
+                self._sonic_whistle(game_state)
+            elif choice == "crossfire":
+                self._crossfire_flurry(to_player, game_state)
             else:
                 self._fire_ticket_barrage(to_player, game_state)
             
             # Reset attack cooldown (faster in Phase 2)
-            self.attack_timer = random.uniform(1.6, 2.4) if self.phase == 1 else random.uniform(1.1, 1.8)
+            self.attack_timer = random.uniform(1.4, 2.2) if self.phase == 1 else random.uniform(0.9, 1.5)
 
         # Normal chase positioning
         desired_vel = pygame.math.Vector2(0, 0)
@@ -145,6 +149,36 @@ class ChiefInspectorMiniBoss(BaseEnemy):
             game_state.projectiles.append(proj)
             
         game_state.particles.spawn_sparks(self.pos.x, self.pos.y, count=6, color=COLOR_BRASS)
+
+    def _sonic_whistle(self, game_state):
+        """Blasts a piercing conductor whistle creating a repelling sonic shockwave."""
+        from src.entities.enemies.brute import ShockwaveRing
+        game_state.audio.play('alarm')
+        game_state.camera.add_trauma(0.4)
+        game_state.particles.spawn_sparks(self.pos.x, self.pos.y, count=14, color=COLOR_CRIT_YELLOW)
+        ring = ShockwaveRing(self.pos.x, self.pos.y, max_radius=190.0, damage=18, speed=360.0)
+        if hasattr(game_state, "shockwaves"):
+            game_state.shockwaves.append(ring)
+
+    def _crossfire_flurry(self, to_player: pygame.math.Vector2, game_state):
+        """Fires two converging fans of spinning tickets across angles."""
+        base_angle = math.atan2(to_player.y, to_player.x)
+        game_state.audio.play('shoot')
+        for side in (-1, 1):
+            ang = base_angle + side * 0.35
+            for spread in (-0.15, 0.0, 0.15):
+                final_ang = ang + spread
+                vel = pygame.math.Vector2(math.cos(final_ang), math.sin(final_ang)) * 460.0
+                proj = Projectile(
+                    self.pos.x, self.pos.y,
+                    vel=vel,
+                    damage_event=DamageEvent(13, source_type="enemy"),
+                    radius=5.0,
+                    lifetime=1.6,
+                    color=COLOR_BRASS_HIGHLIGHT,
+                    owner="enemy"
+                )
+                game_state.projectiles.append(proj)
 
     def _start_rush(self, direction: pygame.math.Vector2):
         self.current_attack = "rush"

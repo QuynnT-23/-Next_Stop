@@ -1,4 +1,5 @@
 """Upgrade drafting modal displaying 3 randomized Boons or Level-Ups (Hades style)."""
+import math
 import pygame
 from src.config import (
     SCREEN_WIDTH, SCREEN_HEIGHT, COLOR_STEEL_DARK, COLOR_STEEL_MID,

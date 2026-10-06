@@ -86,12 +86,12 @@ class ConductorBoss(BaseEnemy):
         self.update_physics(dt)
 
     def choose_next_attack(self, to_player: pygame.math.Vector2, game_state):
-        patterns = ["salvo", "steam_ring"]
+        patterns = ["salvo", "steam_ring", "boiler_slam", "furnace_mortar"]
         if self.phase == 2:
             patterns.append("rush")
-            self.attack_timer = random.uniform(1.2, 2.0)
+            self.attack_timer = random.uniform(1.1, 1.8)
         else:
-            self.attack_timer = random.uniform(2.2, 3.2)
+            self.attack_timer = random.uniform(1.8, 2.8)
 
         self.current_attack = random.choice(patterns)
         
@@ -108,6 +108,35 @@ class ConductorBoss(BaseEnemy):
             diff = self.rush_target - self.pos
             self.rush_dir = diff.normalize() if diff.length_squared() > 0 else pygame.math.Vector2(1, 0)
             game_state.audio.play('alarm')
+        elif self.current_attack == "boiler_slam":
+            self.execute_boiler_slam(game_state)
+        elif self.current_attack == "furnace_mortar":
+            self.execute_furnace_mortar(to_player, game_state)
+
+    def execute_boiler_slam(self, game_state):
+        """Slams the metal floor, emitting a massive ground shockwave."""
+        from src.entities.enemies.brute import ShockwaveRing
+        game_state.audio.play('explosion')
+        game_state.camera.add_trauma(0.6)
+        game_state.particles.spawn_explosion(self.pos.x, self.pos.y, radius=80)
+        ring = ShockwaveRing(self.pos.x, self.pos.y, max_radius=220.0, damage=24, speed=340.0)
+        if hasattr(game_state, "shockwaves"):
+            game_state.shockwaves.append(ring)
+        self.current_attack = None
+
+    def execute_furnace_mortar(self, to_player: pygame.math.Vector2, game_state):
+        """Lobs molten slag mortars leaving burning floor hazard puddles."""
+        from src.entities.enemies.brute import FireHazard
+        game_state.audio.play('shotgun')
+        game_state.camera.add_trauma(0.3)
+        count = 4 if self.phase == 2 else 3
+        for _ in range(count):
+            target_x = game_state.player.pos.x + random.uniform(-90, 90)
+            target_y = game_state.player.pos.y + random.uniform(-70, 70)
+            if hasattr(game_state, "fire_hazards"):
+                game_state.fire_hazards.append(FireHazard(target_x, target_y, radius=48.0, duration=4.0))
+            game_state.particles.spawn_sparks(target_x, target_y, count=12, color=COLOR_EMBER_ORANGE)
+        self.current_attack = None
 
     def fire_salvo(self, to_player: pygame.math.Vector2, game_state):
         """Fires an arc of 5 heavy steam rivets."""

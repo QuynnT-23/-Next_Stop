@@ -17,13 +17,26 @@ from src.combat.boons import (
 )
 from src.combat.damage import DamageEvent
 from src.entities.enemies.boss import ConductorBoss
+from src.entities.enemies.miniboss import ChiefInspectorMiniBoss
 from src.entities.enemies.brute import BoilerBrute, FurnaceGolem, ShockwaveRing
 from src.level.train_car import ExplosiveBarrel, SupplyCrate
+from src.core.progression import ProgressionManager
+import tempfile
 
 def run_tests():
     print("--- 1. Initializing Pygame in Headless Mode ---")
     pygame.init()
-    game = Game(headless=True)
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tf:
+        temp_save = tf.name
+
+    import atexit
+    import os
+    atexit.register(lambda: os.remove(temp_save) if os.path.exists(temp_save) else None)
+
+    mock_pm = ProgressionManager(save_path=temp_save)
+    mock_pm.current_track_idx = 0
+    mock_pm.loop_count = 0
+    game = Game(headless=True, progression=mock_pm)
     assert game.screen is not None
     assert game.state == Game.STATE_HUB
     print("✓ Game headless initialization passed.")
@@ -31,32 +44,27 @@ def run_tests():
     print("--- 2. Testing Route & Weapon Selection (Hub State) ---")
     hub = game.hub_station
     test_surface = pygame.Surface((1280, 720))
-    hub.draw(test_surface)  # Populate rects
-    
-    # Verify mouse clicks on route tabs (Subway is locked as special server event)
-    assert len(hub.route_tab_rects) >= 2, "Hub should have route tab rects populated"
-    subway_tab_center = hub.route_tab_rects[1].center
-    hub.handle_input([pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=subway_tab_center)])
-    assert hub.get_selected_route_id() == "steam", "Clicking locked route should remain on steam"
-    
-    iron_tab_center = hub.route_tab_rects[0].center
-    hub.handle_input([pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=iron_tab_center)])
-    assert hub.get_selected_route_id() == "steam", "Clicking first route tab should select steam"
+    hub.draw(test_surface)  # Populate and render hub
 
-    # Verify mouse clicks on weapon cards
-    assert len(hub.weapon_card_rects) >= 4, "Hub should have 4 weapon card rects"
-    card2_center = hub.weapon_card_rects[1].center
-    hub.handle_input([pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=card2_center)])
-    assert hub.selected_weapon_idx == 1, "Clicking weapon card 2 should select it"
+    # Verify docking bays exist
+    assert len(hub.docking_bays) == 5, "Hub should have 5 docking bays"
+    steam_bay = hub.docking_bays[0]
+    subway_bay = hub.docking_bays[2]
 
-    # Reset back to RivetGun (index 0)
-    card1_center = hub.weapon_card_rects[0].center
-    hub.handle_input([pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=card1_center)])
-    assert hub.selected_weapon_idx == 0, "Clicking weapon card 1 should select RivetGun"
+    # Clicking locked subway bay does not depart
+    clicked_locked = hub.handle_input([pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=subway_bay["door_rect"].center)])
+    assert not clicked_locked, "Clicking locked route door should not trigger departure"
+    assert hub.get_selected_route_id() == "steam"
 
-    # Verify mouse click on 'ALL ABOARD' button to launch run
-    board_clicked = hub.handle_input([pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=hub.board_btn_rect.center)])
-    assert board_clicked is True, "Clicking board button should return True"
+    # Weapon selection via number keys or armory interaction
+    hub.handle_input([pygame.event.Event(pygame.KEYDOWN, key=pygame.K_2)])
+    assert hub.selected_weapon_idx == 1, "Pressing '2' should select weapon 2"
+    hub.handle_input([pygame.event.Event(pygame.KEYDOWN, key=pygame.K_1)])
+    assert hub.selected_weapon_idx == 0, "Pressing '1' should select RivetGun"
+
+    # Boarding via steam docking bay
+    board_clicked = hub.handle_input([pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=steam_bay["door_rect"].center)])
+    assert board_clicked is True, "Clicking steam docking bay door should board"
 
     route_id = hub.get_selected_route_id()
     weapon = hub.get_selected_weapon()
@@ -65,9 +73,10 @@ def run_tests():
     game.start_new_run(route_id, weapon)
     assert game.state == Game.STATE_PLAYING
     assert game.player is not None
-    assert game.player.health == 100
+    assert game.player.health >= 100
+    assert game.player.health == game.player.max_health
     assert len(game.enemies) > 0
-    print(f"✓ Hub Station mouse navigation verified. Run started: Route '{route_id}', Weapon '{weapon.name}', {len(game.enemies)} enemies spawned.")
+    print(f"✓ Walkable Hub Station verified. Run started: Route '{route_id}', Weapon '{weapon.name}', {len(game.enemies)} enemies spawned.")
 
     print("--- 3. Testing Spacebar Attack & Double-Tap Directional Dashing ---")
     # Test Spacebar Attack
@@ -207,36 +216,42 @@ def run_tests():
     assert len(game.enemies) > 0
     print(f"✓ Walking into doorway advanced to Car {game.run_manager.current_car_index + 1}: {game.run_manager.get_current_car_info()['name']}")
 
-    print("--- 10. Testing Full 10-Car Route Progression, Mini-Boss & Hazards ---")
+    print("--- 10. Testing Full 15-Car Route Progression, Mini-Bosses & Hazards ---")
     # Start Iron Express
     game.start_new_run("steam", RivetGun())
-    assert game.run_manager.total_cars == 10, "The Iron Express must now have 10 cars"
+    assert game.run_manager.total_cars == 15, "The Iron Express must now have 15 cars"
 
-    for car_idx in range(10):
+    for car_idx in range(15):
         car_info = game.run_manager.get_current_car_info()
-        print(f"  Testing Car {car_idx + 1}/10: {car_info['name']} ({car_info['type']})")
+        print(f"  Testing Car {car_idx + 1}/15: {car_info['name']} ({car_info['type']})")
         assert len(game.enemies) > 0
 
         # Car 5: Check Chief Ticket Inspector Mini-Boss
         if car_idx == 4:
-            from src.entities.enemies.miniboss import ChiefInspectorMiniBoss
             miniboss = next((e for e in game.enemies if isinstance(e, ChiefInspectorMiniBoss)), None)
             assert miniboss is not None, "Car 5 must spawn ChiefInspectorMiniBoss"
-            assert miniboss.health == 520
-            # Test Phase 2 transition (accounting for 25% passive armor)
-            miniboss.take_damage(DamageEvent(360, source_type="player"), game)
+            assert miniboss.health >= 520
+            # Test Phase 2 transition (accounting for 25% passive armor and stage/loop difficulty HP scaling)
+            dmg_needed = int(miniboss.max_health * 0.75)
+            miniboss.take_damage(DamageEvent(dmg_needed, source_type="player"), game)
             assert miniboss.phase == 2, "Chief Inspector must enter Phase 2 at < 50% HP"
             print("    ✓ Chief Ticket Inspector Mini-Boss verified (Phase 2 enrage active).")
 
-        # Car 7: Check Observation Deck Headwinds
-        if car_idx == 6:
+        # Car 8: Check Observation Deck Headwinds
+        if car_idx == 7:
             orig_px = game.player.pos.x
             game.update(0.1)
             assert game.player.pos.x < orig_px, "Observation Deck must apply leftward headwind force"
             print("    ✓ Observation Deck aerodynamic headwinds verified.")
 
-        # Car 9: Check Furnace Tender Hot Coals
-        if car_idx == 8:
+        # Car 10: Check Inspection Gauntlet (Mini-Boss 2)
+        if car_idx == 9:
+            elite_brute = next((e for e in game.enemies if isinstance(e, BoilerBrute)), None)
+            assert elite_brute is not None and elite_brute.is_elite, "Car 10 must spawn Elite BoilerBrute gauntlet"
+            print("    ✓ Car 10 Central Enforcer Gauntlet Elite Mini-Boss verified.")
+
+        # Car 13: Check Furnace Tender Hot Coals
+        if car_idx == 12:
             assert len(game.train_car.hot_coals) > 0, "Furnace Tender must have hot coals"
             game.player.pos = pygame.math.Vector2(game.train_car.hot_coals[0].centerx, game.train_car.hot_coals[0].centery)
             orig_hp = game.player.health
@@ -245,7 +260,7 @@ def run_tests():
             print("    ✓ Furnace Tender hot coal hazard damage verified.")
 
         # If not final car, clear enemies and advance
-        if car_idx < 9:
+        if car_idx < 14:
             for enemy in game.enemies:
                 enemy.health = 0
                 enemy.die(game)
@@ -290,10 +305,11 @@ def run_tests():
         game.update(0.016)
         game.render()
     print("✓ Frame rendering executed without exceptions.")
-
     print("\n===========================================")
     print("ALL 13 SANITY & INTEGRATION SUITES PASSED! ✓")
     print("===========================================")
+    if os.path.exists(temp_save):
+        os.remove(temp_save)
 
 if __name__ == "__main__":
     run_tests()

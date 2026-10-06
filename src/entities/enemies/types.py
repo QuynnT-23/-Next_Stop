@@ -52,14 +52,16 @@ class TicketInspector(BaseEnemy):
             self.vel *= (0.85 ** (dt * 60))  # Slow down during windup
             if self.state_timer <= 0:
                 self.state = self.STATE_ATTACK
-                self.vel = self.lunge_dir * 420.0  # Burst lunge!
+                lunge_speed = 420.0 * (self.speed / 190.0)
+                self.vel = self.lunge_dir * lunge_speed  # Burst lunge!
                 game_state.audio.play('swing')
 
         elif self.state == self.STATE_ATTACK:
             # Check hit against player
             if (player.pos - self.pos).length() <= (self.radius + player.radius + 16):
-                push = self.lunge_dir * 380.0
-                player.take_damage(DamageEvent(18, source_type="enemy", knockback=push), game_state)
+                push = self.lunge_dir * 420.0
+                dmg = int(18 * getattr(self, "damage_multiplier", 1.0))
+                player.take_damage(DamageEvent(dmg, source_type="enemy", knockback=push), game_state)
             self.state = self.STATE_COOLDOWN
             self.state_timer = self.cooldown_duration
 
@@ -132,23 +134,31 @@ class RangedSteward(BaseEnemy):
             self.state_timer -= dt
             self.vel *= (0.85 ** (dt * 60))
             if self.state_timer <= 0:
-                # Fire projectile!
+                # Fire projectile (burst fire at higher stages / difficulty)
                 self.state = self.STATE_CHASE
                 self.state_timer = 0.0
                 aim_dir = to_player.normalize() if to_player.length_squared() > 0 else pygame.math.Vector2(1, 0)
-                proj_vel = aim_dir * self.shot_speed
-                proj = Projectile(
-                    self.pos.x + aim_dir.x * 20,
-                    self.pos.y + aim_dir.y * 20,
-                    vel=proj_vel,
-                    damage_event=DamageEvent(15, source_type="enemy", damage_type="steam"),
-                    radius=5.5,
-                    lifetime=1.8,
-                    color=COLOR_EMBER_ORANGE,
-                    owner="enemy"
-                )
-                game_state.projectiles.append(proj)
-                game_state.particles.spawn_steam(self.pos.x, self.pos.y, count=4)
+                base_dmg = int(15 * getattr(self, "damage_multiplier", 1.0))
+                burst_count = 3 if getattr(self, "attack_rate_multiplier", 1.0) >= 1.35 else (2 if getattr(self, "attack_rate_multiplier", 1.0) >= 1.20 else 1)
+                
+                for b_idx in range(burst_count):
+                    spread_angle = (b_idx - (burst_count - 1) / 2.0) * 0.12 if burst_count > 1 else 0.0
+                    ang = math.atan2(aim_dir.y, aim_dir.x) + spread_angle
+                    dir_vec = pygame.math.Vector2(math.cos(ang), math.sin(ang))
+                    proj_vel = dir_vec * self.shot_speed
+                    proj = Projectile(
+                        self.pos.x + dir_vec.x * 20,
+                        self.pos.y + dir_vec.y * 20,
+                        vel=proj_vel,
+                        damage_event=DamageEvent(base_dmg, source_type="enemy", damage_type="steam"),
+                        radius=5.5,
+                        lifetime=1.8,
+                        color=COLOR_EMBER_ORANGE,
+                        owner="enemy"
+                    )
+                    game_state.projectiles.append(proj)
+
+                game_state.particles.spawn_steam(self.pos.x, self.pos.y, count=4 + burst_count * 2)
                 game_state.audio.play('shoot')
 
         self.pos += self.vel * dt
@@ -187,6 +197,9 @@ class BoilerImp(BaseEnemy):
                 move_vel = (dir_vec * self.base_speed) + (separation * 160.0)
                 self.vel.x += (move_vel.x - self.vel.x) * min(1.0, dt * 10.0)
                 self.vel.y += (move_vel.y - self.vel.y) * min(1.0, dt * 10.0)
+                # Scurrying spark trail
+                if random.random() < 0.25:
+                    game_state.particles.spawn_sparks(self.pos.x, self.pos.y, count=1, color=COLOR_EMBER_ORANGE)
 
             if self.target_dist <= self.detonation_range:
                 self.state = self.STATE_WINDUP
@@ -206,7 +219,8 @@ class BoilerImp(BaseEnemy):
                 
                 # Area damage to player
                 if (player.pos - self.pos).length() <= 85.0:
-                    player.take_damage(DamageEvent(28, source_type="enemy", damage_type="steam"), game_state)
+                    dmg = int(28 * getattr(self, "damage_multiplier", 1.0))
+                    player.take_damage(DamageEvent(dmg, source_type="enemy", damage_type="steam"), game_state)
                 return
 
         self.pos += self.vel * dt
@@ -230,6 +244,8 @@ class AutomatonShield(BaseEnemy):
         super().__init__(x, y, radius=24, max_health=130, speed=115.0, name="Freight Warden")
         self.shield_angle_span = math.pi * 0.55  # 100 degree frontal shield
         self.fire_timer = 1.8
+        self.bash_cooldown = 1.0
+        self.bash_timer = 0.0
 
     def take_damage(self, damage_event: DamageEvent, game_state) -> bool:
         """Check if damage came from the front. Frontal hits are deflected!"""
@@ -250,19 +266,31 @@ class AutomatonShield(BaseEnemy):
             return
 
         to_player = player.pos - self.pos
+        dist = to_player.length()
         if to_player.length_squared() > 0:
             self.facing_angle = math.atan2(to_player.y, to_player.x)
             chase_dir = to_player.normalize()
             self.vel.x += (chase_dir.x * self.base_speed - self.vel.x) * min(1.0, dt * 5.0)
             self.vel.y += (chase_dir.y * self.base_speed - self.vel.y) * min(1.0, dt * 5.0)
 
+        # Counter-bash when player gets dangerously close
+        self.bash_timer -= dt
+        if dist <= (self.radius + player.radius + 14) and self.bash_timer <= 0:
+            self.bash_timer = self.bash_cooldown
+            bash_push = to_player.normalize() * 460.0 if dist > 0 else pygame.math.Vector2(1, 0) * 460.0
+            bash_dmg = int(16 * getattr(self, "damage_multiplier", 1.0))
+            player.take_damage(DamageEvent(bash_dmg, source_type="enemy", knockback=bash_push), game_state)
+            game_state.particles.spawn_sparks(player.pos.x, player.pos.y, count=8, color=COLOR_STEEL_MID)
+            game_state.audio.play('hit')
+
         # Firing burst
         self.fire_timer -= dt
         if self.fire_timer <= 0:
-            self.fire_timer = 2.2
+            self.fire_timer = 2.2 / getattr(self, "attack_rate_multiplier", 1.0)
             game_state.audio.play('shotgun')
-            aim_dir = to_player.normalize()
+            aim_dir = to_player.normalize() if dist > 0 else pygame.math.Vector2(1, 0)
             base_ang = math.atan2(aim_dir.y, aim_dir.x)
+            dmg = int(14 * getattr(self, "damage_multiplier", 1.0))
             for spread in (-0.14, 0.14):
                 ang = base_ang + spread
                 vel = pygame.math.Vector2(math.cos(ang) * 440, math.sin(ang) * 440)
@@ -270,7 +298,7 @@ class AutomatonShield(BaseEnemy):
                     self.pos.x + math.cos(ang) * 26,
                     self.pos.y + math.sin(ang) * 26,
                     vel=vel,
-                    damage_event=DamageEvent(14, source_type="enemy"),
+                    damage_event=DamageEvent(dmg, source_type="enemy"),
                     radius=4.5,
                     lifetime=1.5,
                     color=(220, 180, 50),

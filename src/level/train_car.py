@@ -331,6 +331,82 @@ class WallLamp:
         pygame.draw.circle(surface, (255, 230, 140), core_pos, max(2, int(3 * flicker)))
 
 
+class VerminMice:
+    """Scurrying vermin mice found in derelict and abandoned train cars."""
+    def __init__(self, x: float, y: float, speed_dir: float = 1.0):
+        self.pos = pygame.math.Vector2(x, y)
+        self.speed = random.uniform(150.0, 260.0) * speed_dir
+        self.radius = 8.0
+        self.is_dead = False
+
+    def update(self, dt: float, player, car_width: float, top_y: float, bot_y: float, game_state):
+        if self.is_dead:
+            return
+        self.pos.x += self.speed * dt
+        self.pos.y += random.uniform(-18.0, 18.0) * dt
+        self.pos.y = max(top_y + 15, min(bot_y - 15, self.pos.y))
+        
+        # Turn around at car bulkheads
+        if self.pos.x < 70:
+            self.pos.x = 70
+            self.speed = abs(self.speed)
+        elif self.pos.x > car_width - 70:
+            self.pos.x = car_width - 70
+            self.speed = -abs(self.speed)
+
+        # Collision with player: nibble / trip damage
+        if player and player.is_alive():
+            if (player.pos - self.pos).length() < (player.radius + self.radius):
+                self.is_dead = True
+                player.take_damage(DamageEvent(4, source_type="hazard"), game_state)
+                game_state.audio.play('hit')
+                game_state.particles.spawn_sparks(self.pos.x, self.pos.y, count=4, color=(120, 110, 100))
+
+    def draw(self, surface: pygame.Surface, camera):
+        if self.is_dead:
+            return
+        sp = camera.apply(self.pos)
+        facing = 1 if self.speed > 0 else -1
+        # Mouse body
+        pygame.draw.ellipse(surface, (95, 90, 85), (sp[0] - 8, sp[1] - 4, 16, 9))
+        # Pink ears
+        pygame.draw.circle(surface, (220, 150, 160), (int(sp[0] + facing * 4), int(sp[1] - 4)), 2)
+        # Tail
+        tail_start = (sp[0] - facing * 7, sp[1] + 1)
+        tail_end = (sp[0] - facing * 14, sp[1] - 3)
+        pygame.draw.line(surface, (190, 150, 150), tail_start, tail_end, 1)
+
+
+class LaserGateHazard:
+    """Subterranean laser security grid barrier."""
+    def __init__(self, x: float, y: float, height: float = 130.0):
+        self.rect = pygame.Rect(x - 8, y - height // 2, 16, height)
+        self.pos = pygame.math.Vector2(x, y)
+        self.timer = random.uniform(0.0, 3.6)
+        self.is_active = True
+
+    def update(self, dt: float, player, enemies, game_state):
+        self.timer = (self.timer + dt) % 3.6
+        self.is_active = (self.timer >= 1.4)
+        
+        if self.is_active and player and player.is_alive():
+            if self.rect.collidepoint(player.pos.x, player.pos.y):
+                player.take_damage(DamageEvent(max(1, int(26 * dt)), source_type="hazard", damage_type="electric"), game_state)
+                if random.random() < 0.25:
+                    game_state.particles.spawn_sparks(player.pos.x, player.pos.y, count=4, color=(40, 220, 255))
+
+    def draw(self, surface: pygame.Surface, camera):
+        dr = camera.apply_rect(self.rect)
+        pygame.draw.rect(surface, (35, 45, 60), (dr.centerx - 6, dr.top - 8, 12, 12), border_radius=2)
+        pygame.draw.rect(surface, (35, 45, 60), (dr.centerx - 6, dr.bottom - 4, 12, 12), border_radius=2)
+        if self.is_active:
+            pygame.draw.line(surface, (60, 240, 255), (dr.centerx, dr.top), (dr.centerx, dr.bottom), 4)
+            pygame.draw.line(surface, COLOR_WHITE, (dr.centerx, dr.top), (dr.centerx, dr.bottom), 2)
+        elif self.timer >= 1.0:
+            if random.random() < 0.5:
+                pygame.draw.line(surface, (255, 60, 60), (dr.centerx, dr.top), (dr.centerx, dr.bottom), 1)
+
+
 class TrainCar:
     """Represents an individual train car arena with walls, windows, and obstacles."""
     def __init__(self, car_index: int, car_type: str, theme: str = "steam"):
@@ -372,6 +448,8 @@ class TrainCar:
         self.crates = []
         self.vents = []
         self.hot_coals = []
+        self.mice: list[VerminMice] = []
+        self.lasers: list[LaserGateHazard] = []
         self._generate_obstacles()
 
         # Parallax background track offset
@@ -526,6 +604,17 @@ class TrainCar:
             self.vents.append(SteamVent(1100, mid_y - 32))
             self.barrels.append(ExplosiveBarrel(450, mid_y - 24))
 
+        # Dynamic Theme Hazards (Vermin Mice, Laser Grids)
+        if self.theme == "derelict":
+            for _ in range(random.randint(5, 8)):
+                mx = random.uniform(250, self.width - 250)
+                my = random.uniform(self.top_wall_y + 30, self.bottom_wall_y - 30)
+                s_dir = 1.0 if random.random() < 0.5 else -1.0
+                self.mice.append(VerminMice(mx, my, s_dir))
+        elif self.theme == "subway" and self.car_type in ["cargo", "armory", "inspection"]:
+            self.lasers.append(LaserGateHazard(650, mid_y))
+            self.lasers.append(LaserGateHazard(1250, mid_y))
+
     def update(self, dt: float, player=None, enemies=None, game_state=None):
         # Scroll track parallax
         self.track_scroll = (self.track_scroll + self.speed_mph * 12.0 * dt) % 120.0
@@ -535,6 +624,17 @@ class TrainCar:
             c.update(dt)
         self.crates = [c for c in self.crates if not c.is_dead]
         self.barrels = [b for b in self.barrels if not b.is_dead]
+
+        # Update vermin mice (Derelict Freight hazard)
+        if player and game_state:
+            for m in self.mice:
+                m.update(dt, player, self.width, self.top_wall_y, self.bottom_wall_y, game_state)
+            self.mice = [m for m in self.mice if not m.is_dead]
+
+        # Update laser security gates (Subway hazard)
+        if player and enemies is not None and game_state:
+            for l in self.lasers:
+                l.update(dt, player, enemies, game_state)
 
         # Update destructible windows
         for win in self.windows:
@@ -612,11 +712,41 @@ class TrainCar:
             for gx in range(0, self.width, 40):
                 sp = camera.apply(pygame.math.Vector2(gx, self.top_wall_y))
                 pygame.draw.line(surface, (40, 28, 24), sp, (sp[0], sp[1] + self.height), 1)
+        elif self.theme == "derelict":
+            # Rusted Industrial Scrap Metal & Rotting Wood
+            pygame.draw.rect(surface, (38, 28, 24), floor_screen_rect)
+            for gx in range(0, self.width, 80):
+                sp = camera.apply(pygame.math.Vector2(gx, self.top_wall_y))
+                pygame.draw.line(surface, (58, 38, 30), sp, (sp[0], sp[1] + self.height), 2)
+            for gx in range(120, self.width, 160):
+                sp = camera.apply(pygame.math.Vector2(gx, (self.top_wall_y + self.bottom_wall_y) // 2))
+                pygame.draw.ellipse(surface, (25, 18, 16), (sp[0] - 30, sp[1] - 15, 60, 30))
         elif self.theme == "subway":
-            pygame.draw.rect(surface, COLOR_SUBWAY_TILES, floor_screen_rect)
+            pygame.draw.rect(surface, (20, 24, 32), floor_screen_rect)
+            rail_y = (self.top_wall_y + self.bottom_wall_y) // 2
+            r_sp1 = camera.apply(pygame.math.Vector2(0, rail_y))
+            r_sp2 = camera.apply(pygame.math.Vector2(self.width, rail_y))
+            pygame.draw.line(surface, (30, 180, 220), r_sp1, r_sp2, 3)
             for gx in range(0, self.width, 60):
                 sp = camera.apply(pygame.math.Vector2(gx, self.top_wall_y))
-                pygame.draw.line(surface, (25, 30, 38), sp, (sp[0], sp[1] + self.height), 1)
+                pygame.draw.line(surface, (28, 35, 48), sp, (sp[0], sp[1] + self.height), 1)
+        elif self.theme == "cryo":
+            # Cobalt Frosted Ice Sheet
+            pygame.draw.rect(surface, (24, 40, 62), floor_screen_rect)
+            for gx in range(0, self.width, 90):
+                sp = camera.apply(pygame.math.Vector2(gx, self.top_wall_y))
+                pygame.draw.line(surface, (45, 75, 110), sp, (sp[0] + 50, sp[1] + self.height), 2)
+        elif self.theme == "infernal":
+            # Charred Grate over Glowing Molten Magma River
+            pygame.draw.rect(surface, (26, 18, 18), floor_screen_rect)
+            mid_y = (self.top_wall_y + self.bottom_wall_y) // 2
+            lava_pulse = (math.sin(pygame.time.get_ticks() * 0.008) + 1) * 0.5
+            lava_col = (int(220 + 35 * lava_pulse), int(60 + 40 * lava_pulse), 20)
+            l_rect = camera.apply_rect(pygame.Rect(0, mid_y - 45, self.width, 90))
+            pygame.draw.rect(surface, lava_col, l_rect)
+            for gx in range(0, self.width, 35):
+                sp = camera.apply(pygame.math.Vector2(gx, self.top_wall_y))
+                pygame.draw.line(surface, (15, 12, 12), sp, (sp[0], sp[1] + self.height), 3)
         else:
             # Polished Rich Mahogany Wood Planks
             pygame.draw.rect(surface, (45, 26, 18), floor_screen_rect)
@@ -711,6 +841,12 @@ class TrainCar:
             b.draw(surface, camera)
         for c in self.crates:
             c.draw(surface, camera)
+
+        # 5b. Theme Hazards (Vermin Mice, Laser Grids)
+        for m in self.mice:
+            m.draw(surface, camera)
+        for l in self.lasers:
+            l.draw(surface, camera)
 
         # 6. Train Walls, Destructible Windows & Wall Sconces
         self._draw_walls_and_windows(surface, camera)

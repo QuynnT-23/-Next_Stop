@@ -137,21 +137,29 @@ def test_melee_window_interaction():
     print("✓ Melee cleave window damage verified.")
 
 def test_hub_station_locked_subway():
-    """Verify that Neo-Subway is locked as a Special Server Event in the Hub."""
+    """Verify that locked routes like Neo-Subway cannot be boarded in the Hub Station."""
     print("--- 6. Testing Hub Station Route Locking ---")
     game = Game()
     hub = game.hub_station
+    # Ensure isolated stage state for locking test
+    hub.progression.unlocked_stages = ["steam"]
     test_surface = pygame.Surface((1280, 720))
     hub.draw(test_surface)
 
-    # Attempt to click subway tab
-    subway_tab_center = hub.route_tab_rects[1].center
-    hub.handle_input([pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=subway_tab_center)])
-    assert hub.get_selected_route_id() == "steam", "Subway must be locked to The Iron Express"
+    # Find the subway docking bay (Track 3)
+    subway_bay = next(b for b in hub.docking_bays if b["route_id"] == "subway")
+    assert "subway" not in hub.progression.unlocked_stages, "Subway should be locked by default"
 
-    # Attempt keyboard toggle
-    hub.handle_input([pygame.event.Event(pygame.KEYDOWN, key=pygame.K_e)])
-    assert hub.get_selected_route_id() == "steam", "Keyboard route toggle must keep active route as steam"
+    # Attempt to click subway door rect
+    result = hub.handle_input([pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=subway_bay["door_rect"].center)])
+    assert not result, "Subway door click should not trigger departure when locked"
+    assert hub.get_selected_route_id() == "steam", "Selected route must remain steam"
+
+    # Move player into subway door and press E
+    hub.player_pos = pygame.math.Vector2(subway_bay["door_rect"].center)
+    result_e = hub.handle_input([pygame.event.Event(pygame.KEYDOWN, key=pygame.K_e)])
+    assert not result_e, "Subway interact should not depart when locked"
+    assert hub.get_selected_route_id() == "steam", "Route must remain steam"
     print("✓ Hub Station route locking verified.")
 
 if __name__ == "__main__":

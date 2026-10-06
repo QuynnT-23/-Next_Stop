@@ -166,13 +166,14 @@ class BoilerBrute(BaseEnemy):
                 game_state.particles.spawn_explosion(self.pos.x, self.pos.y, radius=70)
                 
                 # Emit circular Shockwave ring!
-                shockwave = ShockwaveRing(self.pos.x, self.pos.y, max_radius=270.0, speed=360.0, damage=24)
+                dmg_mult = getattr(self, "damage_multiplier", 1.0)
+                shockwave = ShockwaveRing(self.pos.x, self.pos.y, max_radius=270.0, speed=360.0, damage=int(24 * dmg_mult))
                 if hasattr(game_state, "shockwaves"):
                     game_state.shockwaves.append(shockwave)
 
                 # Melee impact if player is right next to brute
                 if (player.pos - self.pos).length() <= (self.radius + player.radius + 20):
-                    player.take_damage(DamageEvent(28, source_type="enemy", knockback=to_player.normalize() * 500.0), game_state)
+                    player.take_damage(DamageEvent(int(28 * dmg_mult), source_type="enemy", knockback=to_player.normalize() * 500.0), game_state)
 
         elif self.state == self.STATE_ATTACK:
             self.state = self.STATE_COOLDOWN
@@ -249,16 +250,17 @@ class FurnaceGolem(BaseEnemy):
         lifetime = dist / speed if speed > 0 else 0.8
         vel = diff.normalize() * speed if dist > 0 else pygame.math.Vector2(1, 0) * speed
 
+        dmg_mult = getattr(self, "damage_multiplier", 1.0)
         proj = Projectile(
             self.pos.x, self.pos.y, vel=vel,
-            damage_event=DamageEvent(16, source_type="enemy", damage_type="fire"),
+            damage_event=DamageEvent(int(16 * dmg_mult), source_type="enemy", damage_type="fire"),
             radius=6.0, lifetime=lifetime, color=COLOR_EMBER_ORANGE, owner="enemy"
         )
         game_state.projectiles.append(proj)
         
         # When globule lands, spawn FireHazard puddle!
         if hasattr(game_state, "fire_hazards"):
-            game_state.fire_hazards.append(FireHazard(target_pos.x, target_pos.y, radius=42.0, duration=3.5))
+            game_state.fire_hazards.append(FireHazard(target_pos.x, target_pos.y, radius=42.0, duration=3.5, damage_per_sec=int(18 * dmg_mult)))
 
     def draw(self, surface: pygame.Surface, camera):
         screen_pos = camera.apply(self.pos)

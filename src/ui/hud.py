@@ -6,6 +6,7 @@ from src.config import (
     COLOR_WHITE, COLOR_HEALTH_GREEN, COLOR_HEALTH_BG, COLOR_HEALTH_LOST,
     COLOR_STAMINA_CYAN, COLOR_STEEL_DARK, COLOR_STEEL_MID, COLOR_EMBER_ORANGE
 )
+from src.combat.boons import get_active_synergies
 
 class HUD:
     """Renders player stats, active weapon, current car, enemy count, and navigation aids."""
@@ -120,7 +121,6 @@ class HUD:
 
         # 6. Top-Right Active Boons & Duo Synergies
         if player.boons:
-            from src.combat.boons import get_active_synergies
             active_syns = get_active_synergies(player.boons)
             
             start_rx = SCREEN_WIDTH - 230
