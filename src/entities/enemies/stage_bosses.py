@@ -23,14 +23,14 @@ from src.ui.sprite_renderer import (
 class ScrapperForemanMiniBoss(BaseEnemy):
     """Stage 2 Mini-Boss (Car 5): A burly junkyard raider with a giant pipe wrench."""
     def __init__(self, x: float, y: float):
-        super().__init__(x, y, radius=34, max_health=620, speed=160.0, name="Scrapper Foreman")
+        super().__init__(x, y, radius=40, max_health=760, speed=160.0, name="Scrapper Foreman")
         self.is_miniboss = True
         self.attack_timer = 1.8
         self.current_attack = None
         self.attack_state = 0
         self.state_timer = 0.0
         self.rush_dir = pygame.math.Vector2(0, 0)
-        self.melee_damage = 26
+        self.melee_damage = 28
 
     def update(self, dt: float, player, train_car, game_state):
         if not self.is_alive():
@@ -91,7 +91,7 @@ class ScrapperForemanMiniBoss(BaseEnemy):
 class VerminBroodEngineBoss(BaseEnemy):
     """Stage 2 Final Boss (Car 15): Rusted industrial incinerator infected by mutant vermin."""
     def __init__(self, x: float, y: float):
-        super().__init__(x, y, radius=48, max_health=1050, speed=120.0, name="The Vermin Brood Engine")
+        super().__init__(x, y, radius=60, max_health=1480, speed=120.0, name="The Vermin Brood Engine")
         self.phase = 1
         self.attack_timer = 2.0
         self.current_attack = None
@@ -171,7 +171,7 @@ class VerminBroodEngineBoss(BaseEnemy):
 class CyberDispatcherMiniBoss(BaseEnemy):
     """Stage 3 Mini-Boss (Car 5): High-voltage transit officer with shock batons."""
     def __init__(self, x: float, y: float):
-        super().__init__(x, y, radius=32, max_health=680, speed=185.0, name="Cyber Dispatcher")
+        super().__init__(x, y, radius=38, max_health=720, speed=185.0, name="Cyber Dispatcher")
         self.is_miniboss = True
         self.attack_timer = 1.6
         self.current_attack = None
@@ -214,7 +214,7 @@ class CyberDispatcherMiniBoss(BaseEnemy):
 class TractionAICoreBoss(BaseEnemy):
     """Stage 3 Final Boss (Car 15): The subway autonomous train traction AI."""
     def __init__(self, x: float, y: float):
-        super().__init__(x, y, radius=50, max_health=1180, speed=135.0, name="Traction AI Core")
+        super().__init__(x, y, radius=58, max_health=1550, speed=135.0, name="Traction AI Core")
         self.phase = 1
         self.attack_timer = 1.8
         self.laser_angle = 0.0
@@ -290,7 +290,7 @@ class TractionAICoreBoss(BaseEnemy):
 class SubZeroWardenMiniBoss(BaseEnemy):
     """Stage 4 Mini-Boss (Car 5): Heavily armored cryogenic security warden."""
     def __init__(self, x: float, y: float):
-        super().__init__(x, y, radius=35, max_health=740, speed=165.0, name="Sub-Zero Warden")
+        super().__init__(x, y, radius=40, max_health=780, speed=165.0, name="Sub-Zero Warden")
         self.is_miniboss = True
         self.attack_timer = 1.8
 
@@ -331,7 +331,7 @@ class SubZeroWardenMiniBoss(BaseEnemy):
 class CryoTurbineEngineBoss(BaseEnemy):
     """Stage 4 Final Boss (Car 15): Dual cryogenic turbine reactor."""
     def __init__(self, x: float, y: float):
-        super().__init__(x, y, radius=52, max_health=1320, speed=125.0, name="The Cryo-Turbine Engine")
+        super().__init__(x, y, radius=62, max_health=1650, speed=125.0, name="The Cryo-Turbine Engine")
         self.phase = 1
         self.attack_timer = 2.0
 
@@ -404,7 +404,7 @@ class CryoTurbineEngineBoss(BaseEnemy):
 class AshPyromancerMiniBoss(BaseEnemy):
     """Stage 5 Mini-Boss (Car 5): Blazing fire zealot with twin flamethrowers."""
     def __init__(self, x: float, y: float):
-        super().__init__(x, y, radius=34, max_health=820, speed=175.0, name="Ash Pyromancer")
+        super().__init__(x, y, radius=39, max_health=740, speed=175.0, name="Ash Pyromancer")
         self.is_miniboss = True
         self.attack_timer = 1.5
 
@@ -446,7 +446,7 @@ class AshPyromancerMiniBoss(BaseEnemy):
 class IronLeviathanBoss(BaseEnemy):
     """Stage 5 Final Boss (Car 15): The ultimate doomsday locomotive furnace overlord."""
     def __init__(self, x: float, y: float):
-        super().__init__(x, y, radius=56, max_health=1600, speed=140.0, name="The Iron Leviathan")
+        super().__init__(x, y, radius=70, max_health=1950, speed=140.0, name="The Iron Leviathan")
         self.phase = 1
         self.attack_timer = 1.8
 

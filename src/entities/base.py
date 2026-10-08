@@ -17,6 +17,7 @@ class Entity:
         # Combat feedback states
         self.flash_timer = 0.0          # Seconds to flash white on hit
         self.invulnerable_timer = 0.0   # Seconds to ignore incoming damage
+        self.hitstop_timer = 0.0        # Seconds to freeze physics on heavy impact
         self.is_dead = False
         self.walk_distance = 0.0        # Cumulative distance traveled for walk cycle animations
 
@@ -66,7 +67,10 @@ class Entity:
         door_mid_y = (train_car.top_wall_y + train_car.bottom_wall_y) // 2
         in_doorway = (door_mid_y - 65 <= self.pos.y <= door_mid_y + 65)
         
-        if getattr(train_car, "exit_unlocked", False) and in_doorway:
+        can_pass_door = getattr(train_car, "exit_unlocked", False) and (
+            not getattr(train_car, "boon_pedestal_active", False) or getattr(train_car, "boon_claimed", False)
+        )
+        if can_pass_door and in_doorway:
             max_x = train_car.width + 40
         else:
             max_x = bounds.right - self.radius

@@ -143,10 +143,10 @@ def run_tests():
     print("--- 6. Testing Brute Enemy (BoilerBrute) & Expanding Shockwaves ---")
     brute = BoilerBrute(400, 300)
     initial_brute_hp = brute.health
-    assert initial_brute_hp == 250
+    assert initial_brute_hp == 340
     # Test armor reduction
     brute.take_damage(DamageEvent(100, source_type="player"), game)
-    assert brute.health == 250 - 80, "Brute 20% passive armor should reduce 100 dmg to 80"
+    assert brute.health == 340 - 80, "Brute 20% passive armor should reduce 100 dmg to 80"
     
     # Test Shockwave
     shockwave = ShockwaveRing(400, 300, max_radius=200, speed=300, damage=20)
@@ -210,7 +210,10 @@ def run_tests():
     old_car_idx = game.run_manager.current_car_index
     door_mid_y = (game.train_car.top_wall_y + game.train_car.bottom_wall_y) // 2
     game.player.pos = pygame.math.Vector2(game.train_car.width - 90, door_mid_y)
-    assert game.train_car.can_player_exit(game.player.pos, game.player.radius)
+    assert not game.train_car.can_player_exit(game.player.pos, game.player.radius), "Exit door must be locked before boon is claimed"
+    # Claim the boon to unlock exit
+    game.train_car.boon_claimed = True
+    assert game.train_car.can_player_exit(game.player.pos, game.player.radius), "Exit door should allow exit once boon is claimed"
     game.update(0.016)
     assert game.run_manager.current_car_index == old_car_idx + 1
     assert len(game.enemies) > 0

@@ -89,8 +89,11 @@ class BaseEnemy(Entity):
 
     def take_damage(self, damage_event, game_state):
         applied = super().take_damage(damage_event, game_state)
-        if applied and hasattr(game_state, "damage_dealt") and damage_event.source_type == "player":
-            game_state.damage_dealt += damage_event.amount
+        if applied and damage_event.source_type == "player":
+            if hasattr(game_state, "damage_dealt"):
+                game_state.damage_dealt += damage_event.amount
+            if hasattr(game_state, "player") and game_state.player and hasattr(game_state.player, "add_super_charge"):
+                game_state.player.add_super_charge(damage_event.amount * 0.35)
         return applied
 
     def die(self, game_state):

@@ -9,11 +9,12 @@ from src.config import (
     COLOR_WHITE, COLOR_BRASS, COLOR_BRASS_HIGHLIGHT,
     COLOR_STEEL_DARK, COLOR_CRIT_YELLOW, COLOR_EMBER_ORANGE
 )
+from src.ui.sprite_renderer import draw_chief_inspector_sprite
 
 class ChiefInspectorMiniBoss(BaseEnemy):
     """The tyrannical Lead Ticket Inspector who presides over Car 5."""
     def __init__(self, x: float, y: float):
-        super().__init__(x, y, radius=32, max_health=520, speed=155.0, name="Chief Ticket Inspector")
+        super().__init__(x, y, radius=38, max_health=680, speed=160.0, name="Chief Ticket Inspector")
         self.boss_name = "CHIEF TICKET INSPECTOR"
         self.is_miniboss = True
         self.phase = 1
@@ -224,16 +225,6 @@ class ChiefInspectorMiniBoss(BaseEnemy):
     def draw(self, surface: pygame.Surface, camera):
         screen_pos = camera.apply(self.pos)
         
-        # Hit flash
-        if self.flash_timer > 0:
-            body_color = COLOR_WHITE
-        elif self.phase == 2:
-            # Enraged red pulse
-            pulse = (math.sin(pygame.time.get_ticks() * 0.01) + 1) * 0.5
-            body_color = (int(160 + 80 * pulse), 35, 35)
-        else:
-            body_color = (35, 45, 65)  # Navy conductor coat
-            
         # Rush telegraph line
         if self.current_attack == "rush" and self.attack_state == 0:
             prog = 1.0 - (self.state_timer / 0.65)
@@ -242,38 +233,5 @@ class ChiefInspectorMiniBoss(BaseEnemy):
             end_y = screen_pos[1] + int(self.rush_dir.y * line_len)
             pygame.draw.line(surface, (255, 60, 60), screen_pos, (end_x, end_y), 3)
 
-        # Base Shadow
-        pygame.draw.circle(surface, (15, 15, 20), (screen_pos[0], screen_pos[1] + 8), self.radius)
-        
-        # Heavy Coat Body
-        pygame.draw.circle(surface, body_color, screen_pos, self.radius)
-        pygame.draw.circle(surface, COLOR_BRASS, screen_pos, self.radius, 3)
-
-        # Brass Epaulets on shoulders
-        perp = pygame.math.Vector2(-math.sin(self.facing_angle), math.cos(self.facing_angle))
-        left_ep = screen_pos + perp * (self.radius * 0.75)
-        right_ep = screen_pos - perp * (self.radius * 0.75)
-        pygame.draw.circle(surface, COLOR_BRASS_HIGHLIGHT, (int(left_ep.x), int(left_ep.y)), 7)
-        pygame.draw.circle(surface, COLOR_BRASS_HIGHLIGHT, (int(right_ep.x), int(right_ep.y)), 7)
-
-        # Conductor Peaked Cap Visor
-        cap_offset = pygame.math.Vector2(math.cos(self.facing_angle), math.sin(self.facing_angle)) * (self.radius * 0.6)
-        cap_pos = screen_pos + cap_offset
-        pygame.draw.circle(surface, (20, 25, 35), (int(cap_pos.x), int(cap_pos.y)), int(self.radius * 0.55))
-        pygame.draw.circle(surface, COLOR_BRASS, (int(cap_pos.x), int(cap_pos.y)), int(self.radius * 0.55), 2)
-        
-        # Brass Badge on cap
-        badge_pos = cap_pos + pygame.math.Vector2(math.cos(self.facing_angle), math.sin(self.facing_angle)) * 6
-        pygame.draw.circle(surface, COLOR_CRIT_YELLOW, (int(badge_pos.x), int(badge_pos.y)), 4)
-
-        # Glowing Visor / Red Monocle
-        eye_pos = screen_pos + pygame.math.Vector2(math.cos(self.facing_angle), math.sin(self.facing_angle)) * (self.radius * 0.4)
-        eye_color = (255, 30, 30) if self.phase == 2 else (255, 90, 40)
-        pygame.draw.circle(surface, eye_color, (int(eye_pos.x), int(eye_pos.y)), 5)
-
-        # Heavy Gold-Plated Baton
-        baton_angle = self.facing_angle + 0.5
-        baton_start = screen_pos + pygame.math.Vector2(math.cos(baton_angle), math.sin(baton_angle)) * (self.radius * 0.7)
-        baton_end = baton_start + pygame.math.Vector2(math.cos(baton_angle), math.sin(baton_angle)) * 26
-        pygame.draw.line(surface, COLOR_BRASS_HIGHLIGHT, baton_start, baton_end, 5)
-        pygame.draw.circle(surface, COLOR_CRIT_YELLOW, (int(baton_end.x), int(baton_end.y)), 4)
+        draw_chief_inspector_sprite(surface, screen_pos, self)
+        self.draw_health_bar(surface, camera)

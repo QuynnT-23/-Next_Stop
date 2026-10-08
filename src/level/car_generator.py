@@ -218,6 +218,10 @@ class RunManager:
     def is_final_car(self) -> bool:
         return self.current_car_index >= self.total_cars - 1
 
+    def set_current_car(self, car_index: int):
+        """Directly set current car index for testing/warping."""
+        self.current_car_index = max(0, min(self.total_cars - 1, int(car_index)))
+
     def create_current_car(self) -> TrainCar:
         car_info = self.get_current_car_info()
         return TrainCar(

@@ -473,6 +473,9 @@ class TrainCar:
             return False
         if not self.exit_unlocked:
             return False
+        # Cannot advance until the car upgrade has been claimed!
+        if self.boon_pedestal_active and not self.boon_claimed:
+            return False
         player_box = pygame.Rect(player_pos.x - player_radius, player_pos.y - player_radius, player_radius * 2, player_radius * 2)
         return player_box.colliderect(self.exit_trigger_rect) or player_pos.x >= (self.width - 110)
 
@@ -944,18 +947,34 @@ class TrainCar:
             return
 
         if self.exit_unlocked:
-            pygame.draw.rect(surface, (15, 20, 25), out_door)
-            pygame.draw.rect(surface, (40, 220, 110), out_door, 3)
-            
-            pulse = (math.sin(pygame.time.get_ticks() * 0.008) + 1) * 0.5
-            glow_w = int(25 + 15 * pulse)
-            door_glow = pygame.Surface((glow_w, out_door.height), pygame.SRCALPHA)
-            pygame.draw.rect(door_glow, (40, 220, 110, int(50 + 60 * pulse)), (0, 0, glow_w, out_door.height))
-            surface.blit(door_glow, (out_door.x - glow_w, out_door.y))
+            if self.boon_pedestal_active and not self.boon_claimed:
+                # Door locked because upgrade hasn't been claimed yet!
+                pygame.draw.rect(surface, (28, 24, 18), out_door)
+                pygame.draw.rect(surface, (235, 175, 45), out_door, 3)
+                
+                # Heavy iron security lockdown bars over door
+                for bar_y in range(out_door.top + 16, out_door.bottom - 10, 22):
+                    pygame.draw.line(surface, COLOR_STEEL_MID, (out_door.left + 6, bar_y), (out_door.right - 6, bar_y), 4)
+                    pygame.draw.circle(surface, COLOR_BRASS_HIGHLIGHT, (out_door.left + 10, bar_y), 3)
+                    pygame.draw.circle(surface, COLOR_BRASS_HIGHLIGHT, (out_door.right - 10, bar_y), 3)
 
-            prompt_surf = self.font_prompt.render("NEXT CAR → [WALK THROUGH]", True, (80, 255, 140))
-            prompt_rect = prompt_surf.get_rect(center=(out_door.centerx - 60, out_door.top - 18))
-            surface.blit(prompt_surf, prompt_rect)
+                # Caution warning sign
+                warn_surf = self.font_prompt.render("[DOOR LOCKED: CLAIM UPGRADE FIRST]", True, (255, 205, 75))
+                warn_rect = warn_surf.get_rect(center=(out_door.centerx - 85, out_door.top - 18))
+                surface.blit(warn_surf, warn_rect)
+            else:
+                pygame.draw.rect(surface, (15, 20, 25), out_door)
+                pygame.draw.rect(surface, (40, 220, 110), out_door, 3)
+                
+                pulse = (math.sin(pygame.time.get_ticks() * 0.008) + 1) * 0.5
+                glow_w = int(25 + 15 * pulse)
+                door_glow = pygame.Surface((glow_w, out_door.height), pygame.SRCALPHA)
+                pygame.draw.rect(door_glow, (40, 220, 110, int(50 + 60 * pulse)), (0, 0, glow_w, out_door.height))
+                surface.blit(door_glow, (out_door.x - glow_w, out_door.y))
+
+                prompt_surf = self.font_prompt.render("NEXT CAR → [WALK THROUGH]", True, (80, 255, 140))
+                prompt_rect = prompt_surf.get_rect(center=(out_door.centerx - 60, out_door.top - 18))
+                surface.blit(prompt_surf, prompt_rect)
         else:
             pygame.draw.rect(surface, COLOR_STEEL_MID, out_door)
             pygame.draw.rect(surface, (220, 50, 50), out_door, 3)

@@ -10,11 +10,12 @@ from src.config import (
     COLOR_STEEL_DARK, COLOR_BRASS, COLOR_CARPET_RED,
     COLOR_BRASS_HIGHLIGHT, COLOR_SHADOW
 )
+from src.ui.sprite_renderer import draw_conductor_sprite
 
 class ConductorBoss(BaseEnemy):
     """The final encounter: Master of the Iron Locomotive."""
     def __init__(self, x: float, y: float):
-        super().__init__(x, y, radius=46, max_health=920, speed=130.0, name="The Conductor")
+        super().__init__(x, y, radius=58, max_health=1320, speed=135.0, name="The Conductor")
         self.phase = 1
         self.attack_timer = 2.0
         self.current_attack = None
@@ -226,19 +227,6 @@ class ConductorBoss(BaseEnemy):
     def draw(self, surface: pygame.Surface, camera):
         screen_pos = camera.apply(self.pos)
         
-        # Color based on phase & hit flash
-        if self.flash_timer > 0:
-            body_color = COLOR_WHITE
-        elif self.phase == 2:
-            # Pulsing rage red/orange
-            pulse = (math.sin(pygame.time.get_ticks() * 0.008) + 1) * 0.5
-            body_color = (int(200 + 55 * pulse), 40, 20)
-        else:
-            body_color = COLOR_BRASS
-
-        # Drop Shadow
-        pygame.draw.circle(surface, COLOR_SHADOW, (screen_pos[0], screen_pos[1] + 12), int(self.radius * 1.05))
-
         # Rush telegraph line
         if self.current_attack == "rush" and self.attack_state == 0:
             prog = 1.0 - (self.state_timer / 0.7)
@@ -249,48 +237,5 @@ class ConductorBoss(BaseEnemy):
             )
             pygame.draw.line(surface, (255, 50, 50), start_pt, end_pt, 4)
 
-        # Outer heavy steel armor shell with rivet studs
-        pygame.draw.circle(surface, COLOR_STEEL_DARK, screen_pos, int(self.radius))
-        pygame.draw.circle(surface, (25, 25, 30), screen_pos, int(self.radius - 2))
-        for r_ang in range(0, 360, 45):
-            rad = math.radians(r_ang)
-            rx = screen_pos[0] + int(math.cos(rad) * (self.radius - 4))
-            ry = screen_pos[1] + int(math.sin(rad) * (self.radius - 4))
-            pygame.draw.circle(surface, COLOR_BRASS, (rx, ry), 2)
-
-        # Main Boiler Hull
-        pygame.draw.circle(surface, body_color, screen_pos, int(self.radius - 7))
-        pygame.draw.circle(surface, COLOR_CARPET_RED, screen_pos, int(self.radius - 14))
-
-        # Dual rear steam exhaust stacks
-        rear_angle = self.facing_angle + math.pi
-        stack_perp = pygame.math.Vector2(-math.sin(self.facing_angle), math.cos(self.facing_angle))
-        for side in [-1, 1]:
-            stack_pos = screen_pos + pygame.math.Vector2(math.cos(rear_angle), math.sin(rear_angle)) * (self.radius * 0.65) + stack_perp * (side * 18)
-            pygame.draw.circle(surface, (20, 20, 25), (int(stack_pos.x), int(stack_pos.y)), 9)
-            pygame.draw.circle(surface, COLOR_BRASS, (int(stack_pos.x), int(stack_pos.y)), 9, 2)
-            pygame.draw.circle(surface, (10, 10, 15), (int(stack_pos.x), int(stack_pos.y)), 5)
-
-        # Central Glowing Firebox Hatch
-        firebox_pulse = (math.sin(pygame.time.get_ticks() * 0.012) + 1) * 0.5
-        fire_col = (255, int(110 + 60 * firebox_pulse), 20)
-        pygame.draw.circle(surface, (30, 20, 15), screen_pos, 16)
-        pygame.draw.circle(surface, fire_col, screen_pos, 12)
-        # Firebox iron grate bars
-        pygame.draw.line(surface, (40, 25, 20), (screen_pos[0] - 10, screen_pos[1]), (screen_pos[0] + 10, screen_pos[1]), 2)
-        pygame.draw.line(surface, (40, 25, 20), (screen_pos[0], screen_pos[1] - 10), (screen_pos[0], screen_pos[1] + 10), 2)
-
-        # Heavy locomotive cowcatcher & headlights on front
-        front_vec = pygame.math.Vector2(math.cos(self.facing_angle), math.sin(self.facing_angle))
-        front_pt = screen_pos + front_vec * (self.radius + 4)
-        left_corner = screen_pos + front_vec * (self.radius - 4) + stack_perp * 24
-        right_corner = screen_pos + front_vec * (self.radius - 4) - stack_perp * 24
-        # Cowcatcher V-wedge
-        pygame.draw.polygon(surface, COLOR_STEEL_DARK, [front_pt, left_corner, right_corner])
-        pygame.draw.polygon(surface, COLOR_BRASS, [front_pt, left_corner, right_corner], 2)
-
-        # Twin forward brass headlights
-        for corner in [left_corner, right_corner]:
-            hl_pos = corner + front_vec * 4
-            pygame.draw.circle(surface, COLOR_BRASS_HIGHLIGHT, (int(hl_pos.x), int(hl_pos.y)), 6)
-            pygame.draw.circle(surface, COLOR_CRIT_YELLOW, (int(hl_pos.x), int(hl_pos.y)), 4)
+        draw_conductor_sprite(surface, screen_pos, self)
+        self.draw_health_bar(surface, camera)

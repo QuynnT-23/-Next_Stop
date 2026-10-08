@@ -55,7 +55,7 @@ class HUD:
                     prog = player.dash_recharge_timer / (player.dash_cooldown_mult * 0.75)
                     pygame.draw.circle(surface, COLOR_STAMINA_CYAN, (cx, cy), max(2, int(8 * min(1.0, prog))))
 
-        dash_label = self.font_small.render("DASH: DOUBLE-TAP WASD / SHIFT", True, (170, 180, 195))
+        dash_label = self.font_small.render("DASH: [2xWASD / R-CLICK]  |  BLOCK: [HOLD SHIFT]", True, (170, 180, 195))
         surface.blit(dash_label, (bar_x + 65, dash_y + 4))
 
         # 3. Active Weapon Info
@@ -77,6 +77,32 @@ class HUD:
                 boost_str = f"OVERCHARGE: {player.attack_boost_timer:.1f}s (+35% SPD)"
                 boost_surf = self.font_small.render(boost_str, True, (255, 230, 110))
                 surface.blit(boost_surf, (bar_x + 8, boost_y + 3))
+
+            # 3b. Super Ability Gauge Bar
+            super_y = weap_y + 36
+            if getattr(player, "attack_boost_timer", 0.0) > 0:
+                super_y += 24
+
+            s_bar_w = 220
+            s_bar_h = 16
+            s_pct = max(0.0, min(1.0, getattr(player, "super_charge", 0.0) / max(1.0, getattr(player, "max_super_charge", 100.0))))
+            is_ready = getattr(player, "can_cast_super", lambda: False)()
+
+            pygame.draw.rect(surface, (18, 20, 26), (bar_x - 3, super_y - 3, s_bar_w + 6, s_bar_h + 6), border_radius=4)
+            if is_ready:
+                pulse = (math.sin(pygame.time.get_ticks() * 0.016) + 1) * 0.5
+                border_c = (int(220 + 35 * pulse), int(180 + 50 * pulse), 40)
+                pygame.draw.rect(surface, border_c, (bar_x - 3, super_y - 3, s_bar_w + 6, s_bar_h + 6), 2, border_radius=4)
+                pygame.draw.rect(surface, (255, 195, 45), (bar_x, super_y, s_bar_w, s_bar_h), border_radius=3)
+                super_txt = self.font_small.render("[E] SUPER READY!", True, (20, 20, 24))
+                surface.blit(super_txt, (bar_x + 8, super_y + 1))
+            else:
+                pygame.draw.rect(surface, COLOR_BRASS, (bar_x - 3, super_y - 3, s_bar_w + 6, s_bar_h + 6), 1, border_radius=4)
+                s_fill_w = int(s_bar_w * s_pct)
+                if s_fill_w > 0:
+                    pygame.draw.rect(surface, (175, 110, 25), (bar_x, super_y, s_fill_w, s_bar_h), border_radius=3)
+                super_txt = self.font_small.render(f"SUPER: {int(s_pct * 100)}%", True, (200, 195, 180))
+                surface.blit(super_txt, (bar_x + 8, super_y + 1))
 
         # 4. Top-Center Car Tracker & Objective Status
         car_info = run_manager.get_current_car_info()
@@ -100,10 +126,16 @@ class HUD:
                 status_bg_col = (45, 20, 10, 200)
                 border_col = (240, 100, 30)
             else:
-                status_str = ">>> CAR SECURED! UPGRADE PEDESTAL ACTIVE & EXIT OPEN >>>"
-                status_col = (80, 255, 150)
-                status_bg_col = (10, 45, 20, 220)
-                border_col = (50, 220, 110)
+                if getattr(train_car, "boon_pedestal_active", False) and not getattr(train_car, "boon_claimed", False):
+                    status_str = ">>> CAR SECURED! CLAIM CAR UPGRADE TO UNLOCK EXIT >>>"
+                    status_col = (255, 205, 50)
+                    status_bg_col = (45, 35, 10, 220)
+                    border_col = (235, 175, 40)
+                else:
+                    status_str = ">>> UPGRADE CLAIMED! EXIT UNLOCKED → NEXT CAR >>>"
+                    status_col = (80, 255, 150)
+                    status_bg_col = (10, 45, 20, 220)
+                    border_col = (50, 220, 110)
 
             status_surf = self.font_status.render(status_str, True, status_col)
             status_rect = status_surf.get_rect(center=(SCREEN_WIDTH // 2, 60))

@@ -35,20 +35,20 @@ def test_enemy_health_buffs():
     assert shield.health == 130
 
     brute = BoilerBrute(100, 100)
-    assert brute.max_health == 250
-    assert brute.health == 250
+    assert brute.max_health == 340
+    assert brute.health == 340
 
     golem = FurnaceGolem(100, 100)
-    assert golem.max_health == 240
-    assert golem.health == 240
+    assert golem.max_health == 340
+    assert golem.health == 340
 
     miniboss = ChiefInspectorMiniBoss(100, 100)
-    assert miniboss.max_health == 520
-    assert miniboss.health == 520
+    assert miniboss.max_health == 680
+    assert miniboss.health == 680
 
     boss = ConductorBoss(100, 100)
-    assert boss.max_health == 920
-    assert boss.health == 920
+    assert boss.max_health == 1320
+    assert boss.health == 1320
     print("✓ All 8 enemy archetype and boss HP buffs verified.")
 
 def test_destructible_windows():
@@ -143,6 +143,8 @@ def test_hub_station_locked_subway():
     hub = game.hub_station
     # Ensure isolated stage state for locking test
     hub.progression.unlocked_stages = ["steam"]
+    hub.progression.current_track_idx = 0
+    hub.selected_route_id = "steam"
     test_surface = pygame.Surface((1280, 720))
     hub.draw(test_surface)
 

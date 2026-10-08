@@ -5,7 +5,7 @@ import pygame
 SCREEN_WIDTH = 1280
 SCREEN_HEIGHT = 720
 FPS = 60
-TITLE = "NEXT STOP (2026): Locomotive Oblivion"
+TITLE = "NEXT STOP (2026): Locomotive Oblivion — Chud Studios"
 
 # Colors - Industrial Art Deco & Steam Palette
 COLOR_BG = (18, 18, 24)

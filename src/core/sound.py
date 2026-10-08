@@ -76,6 +76,14 @@ class SoundManager:
             self.sounds['zap'] = self._create_tone(700, 1200, 0.12, volume=0.4, wave_type="saw")
             # Boss telegraph alarm: sharp double beep
             self.sounds['alarm'] = self._create_tone(900, 950, 0.15, volume=0.5, wave_type="square")
+            # Shield block / parry: solid metallic clank
+            self.sounds['block'] = self._create_tone(420, 260, 0.14, volume=0.55, wave_type="square")
+            # Super Ability surge: ascending high-energy roar
+            self.sounds['super'] = self._create_tone(220, 980, 0.38, volume=0.6, wave_type="saw")
+            # Cartoon boing: pitch rising bouncy spring for Lil' Chud
+            self.sounds['boing'] = self._create_tone(150, 580, 0.22, volume=0.5, wave_type="sine")
+            # Cartoon train whistle: cheerful high-pitch toot
+            self.sounds['whistle'] = self._create_tone(720, 780, 0.32, volume=0.45, wave_type="square")
         except Exception as e:
             print(f"[SoundManager] SFX generation error: {e}")
 

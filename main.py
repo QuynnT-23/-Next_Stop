@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """
 NEXT STOP (2026): Locomotive Oblivion
-A fast-paced runaway train action roguelite dungeon crawler.
+Chud Studios Flagship Production
 """
 import sys
+import asyncio
 import pygame
 from src.core.game import Game
 
-def main():
+async def main():
     pygame.init()
     game = Game()
-    game.run()
+    # Runs seamlessly on native desktop and in browser WebAssembly (Pygbag)
+    await game.run_async()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

@@ -135,10 +135,13 @@ def test_track_modifiers_and_loop_scaling():
     enemies_loop1 = rm_loop1.spawn_enemies_for_car(car_loop1)
     loop1_avg_hp = sum(e.health for e in enemies_loop1) / len(enemies_loop1)
 
-    print(f"  Base Track 1: count={len(enemies_base)}, avg_hp={base_avg_hp:.1f}")
-    print(f"  Track 1+ (Loop 1): count={len(enemies_loop1)}, avg_hp={loop1_avg_hp:.1f}, modifiers={[m['name'] for m in mods]}")
+    total_hp_base = sum(e.health for e in enemies_base)
+    total_hp_loop1 = sum(e.health for e in enemies_loop1)
+    print(f"  Base Track 1: count={len(enemies_base)}, total_hp={total_hp_base}, avg_hp={base_avg_hp:.1f}")
+    print(f"  Track 1+ (Loop 1): count={len(enemies_loop1)}, total_hp={total_hp_loop1}, avg_hp={loop1_avg_hp:.1f}, modifiers={[m['name'] for m in mods]}")
 
-    assert loop1_avg_hp > base_avg_hp, "Track 1+ enemies must have higher HP than base Track 1"
+    assert total_hp_loop1 > total_hp_base, "Track 1+ wave must have significantly higher total HP than base Track 1"
+    assert len(enemies_loop1) >= len(enemies_base), "Track 1+ must have higher enemy density"
     assert rm_loop1.get_loop_display() == "+"
     print("  ✓ Track 1+ modifiers and difficulty scaling verified.")
 

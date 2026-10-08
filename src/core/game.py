@@ -1,4 +1,5 @@
 """Master Game controller orchestrating the loop, FSM states, physics, and rendering."""
+import asyncio
 import pygame
 import math
 from src.config import (
@@ -12,13 +13,17 @@ from src.ui.particles import ParticleManager
 from src.ui.hud import HUD
 from src.ui.upgrade_menu import UpgradeMenu
 from src.ui.hub_station import HubStation
+from src.ui.splash_screen import SplashScreen
 from src.entities.player import Player
 from src.level.car_generator import RunManager
 from src.combat.boons import get_random_boon_choices
 from src.core.progression import ProgressionManager
+from src.combat.enemy_codex import get_codex_id_from_enemy
+from src.ui.test_mode_menu import TestModeMenu
 
 class Game:
     """Central engine managing all subsystems, game states, and loop execution."""
+    STATE_SPLASH = "splash"
     STATE_HUB = "hub"
     STATE_PLAYING = "playing"
     STATE_BOON_DRAFT = "boon_draft"
@@ -29,7 +34,7 @@ class Game:
     def __init__(self, headless: bool = False, progression: ProgressionManager = None):
         self.headless = headless
         self.running = True
-        self.state = self.STATE_HUB
+        self.state = self.STATE_HUB if headless else self.STATE_SPLASH
         
         # Display setup
         if not headless:
@@ -49,6 +54,7 @@ class Game:
         self.upgrade_menu = UpgradeMenu()
         self.progression = progression or ProgressionManager()
         self.hub_station = HubStation(self.progression)
+        self.splash_screen = SplashScreen(self.audio)
 
         # Gameplay entities & progression
         self.player = None
@@ -59,6 +65,10 @@ class Game:
         self.pickups = []
         self.train_car = None
         self.run_manager = None
+
+        # In-Game Test Mode & Dev Console
+        self.test_mode_active = False
+        self.test_mode_menu = TestModeMenu(self)
         
         # Fonts for overlays
         pygame.font.init()
@@ -87,6 +97,90 @@ class Game:
         self.audio.play('shoot')
         pygame.event.clear()
 
+    def toggle_test_mode(self):
+        """Toggle the in-game Test Mode & Dev Console overlay."""
+        self.test_mode_active = not self.test_mode_active
+        if self.test_mode_active:
+            self.test_mode_menu.open()
+            self.audio.play('shoot')
+
+    def deploy_to_stage_and_car(self, route_id: str, car_index: int, starter_weapon, loop_count: int = 0):
+        """Launches run directly into target route and car index for testing."""
+        self.input_handler = InputHandler()
+        self.run_manager = RunManager(route_id, loop_count=loop_count)
+        self.run_manager.set_current_car(car_index)
+        self.train_car = self.run_manager.create_current_car()
+
+        # Reset run metrics
+        self.run_start_ticks = pygame.time.get_ticks()
+        self.run_duration_sec = 0.0
+        self.enemies_killed = 0
+        self.damage_dealt = 0
+        self.earned_xp = 0
+        self.earned_scrap = 0
+        self.newly_unlocked_stage = None
+        self.victory_transition_timer = 0.0
+
+        # Position player
+        start_y = (self.train_car.top_wall_y + self.train_car.bottom_wall_y) // 2
+        self.player = Player(120, start_y)
+        self.player.equip_weapon(starter_weapon)
+        equipped_super = self.progression.get_equipped_super()
+        if equipped_super:
+            self.player.equipped_super_id = equipped_super["id"]
+        self.progression.apply_perks_to_player(self.player)
+
+        # Clear and spawn entities
+        self.projectiles.clear()
+        self.shockwaves.clear()
+        self.fire_hazards.clear()
+        self.pickups.clear()
+        self.enemies = self.run_manager.spawn_enemies_for_car(self.train_car)
+        for enemy in self.enemies:
+            self.progression.record_enemy_encounter(get_codex_id_from_enemy(enemy))
+
+        self.camera.set_bounds(0, self.train_car.width, 0, SCREEN_HEIGHT)
+        self.state = self.STATE_PLAYING
+        self.audio.play('door')
+
+    def warp_to_car(self, car_index: int):
+        """Instantly warps player to target car index during an active run."""
+        if not self.run_manager:
+            return
+        self.run_manager.set_current_car(car_index)
+        self.train_car = self.run_manager.create_current_car()
+        self.camera.set_bounds(0, self.train_car.width, 0, SCREEN_HEIGHT)
+
+        start_y = (self.train_car.top_wall_y + self.train_car.bottom_wall_y) // 2
+        self.player.pos = pygame.math.Vector2(120, start_y)
+        self.player.vel = pygame.math.Vector2(0, 0)
+        self.camera.offset.x = 0
+        self.camera.offset.y = 0
+
+        self.projectiles.clear()
+        self.shockwaves.clear()
+        self.fire_hazards.clear()
+        self.pickups.clear()
+        self.enemies = self.run_manager.spawn_enemies_for_car(self.train_car)
+        for enemy in self.enemies:
+            self.progression.record_enemy_encounter(get_codex_id_from_enemy(enemy))
+        self.audio.play('door')
+
+    def kill_all_enemies(self):
+        """Instantly slays all active enemies in current car to test doors and progression."""
+        for enemy in list(self.enemies):
+            enemy.health = 0
+            enemy.die(self)
+
+    def trigger_boon_draft(self):
+        """Forces an upgrade boon draft modal to open immediately."""
+        existing = self.player.boons if self.player else []
+        owned = {b.id for b in existing}
+        choices = get_random_boon_choices(count=3, existing_boons=existing)
+        self.upgrade_menu.open(choices, owned_ids=owned, existing_boons=existing)
+        self.state = self.STATE_BOON_DRAFT
+        self.audio.play('boon')
+
     def start_new_run(self, route_id: str, starter_weapon):
         """Initialize a new train departure run."""
         self.input_handler = InputHandler()
@@ -109,6 +203,9 @@ class Game:
         start_y = (self.train_car.top_wall_y + self.train_car.bottom_wall_y) // 2
         self.player = Player(120, start_y)
         self.player.equip_weapon(starter_weapon)
+        equipped_super = self.progression.get_equipped_super()
+        if equipped_super:
+            self.player.equipped_super_id = equipped_super["id"]
         self.progression.apply_perks_to_player(self.player)
 
         # Clear active objects
@@ -117,6 +214,8 @@ class Game:
         self.fire_hazards.clear()
         self.pickups.clear()
         self.enemies = self.run_manager.spawn_enemies_for_car(self.train_car)
+        for enemy in self.enemies:
+            self.progression.record_enemy_encounter(get_codex_id_from_enemy(enemy))
         
         # Set camera bounds to current train car
         self.camera.set_bounds(0, self.train_car.width, 0, SCREEN_HEIGHT)
@@ -156,6 +255,8 @@ class Game:
         self.fire_hazards.clear()
         self.pickups.clear()
         self.enemies = self.run_manager.spawn_enemies_for_car(self.train_car)
+        for enemy in self.enemies:
+            self.progression.record_enemy_encounter(get_codex_id_from_enemy(enemy))
         self.audio.play('door')
 
     def handle_events(self) -> bool:
@@ -166,8 +267,29 @@ class Game:
                 self.running = False
                 return False
 
-        if self.state == self.STATE_HUB:
+        # Global toggle for Test & Dev Console (F1 or backquote / tilde)
+        for event in events:
+            if event.type == pygame.KEYDOWN and event.key in (pygame.K_F1, pygame.K_BACKQUOTE):
+                self.toggle_test_mode()
+                return True
+
+        # If test mode modal is active, delegate all input to it
+        if self.test_mode_active:
+            self.test_mode_menu.handle_input(events)
+            return True
+
+        if self.state == self.STATE_SPLASH:
+            if self.splash_screen.handle_input(events):
+                self.state = self.STATE_HUB
+                pygame.event.clear()
+            return True
+
+        elif self.state == self.STATE_HUB:
             boarded = self.hub_station.handle_input(events)
+            if self.hub_station.request_test_mode:
+                self.hub_station.request_test_mode = False
+                self.toggle_test_mode()
+                return True
             if boarded:
                 route = self.hub_station.get_selected_route_id()
                 weapon = self.hub_station.get_selected_weapon()
@@ -205,6 +327,16 @@ class Game:
         """Update game physics, entities, and states."""
         # Cap max dt to avoid physics spiral on lag spike
         dt = min(dt, 0.05)
+
+        # Pause physics while Test Console is open
+        if self.test_mode_active:
+            self.test_mode_menu.update(dt)
+            return
+
+        if self.state == self.STATE_SPLASH:
+            if self.splash_screen.update(dt):
+                self.state = self.STATE_HUB
+            return
 
         if self.state == self.STATE_PLAYING:
             self.run_duration_sec = (pygame.time.get_ticks() - self.run_start_ticks) / 1000.0
@@ -276,8 +408,8 @@ class Game:
                     self.state = self.STATE_BOON_DRAFT
                     self.audio.play('boon')
 
-            # Check exit door progression
-            if self.train_car.exit_unlocked:
+            # Check exit door progression (strictly locked until upgrade is claimed!)
+            if self.train_car.exit_unlocked and (not self.train_car.boon_pedestal_active or self.train_car.boon_claimed):
                 door_walk_through = self.train_car.can_player_exit(self.player.pos, self.player.radius)
                 door_interact = (self.input_handler.interact_pressed and self.player.pos.x >= self.train_car.width - 240)
                 if door_walk_through or door_interact:
@@ -367,7 +499,10 @@ class Game:
         """Draw everything based on current state."""
         self.screen.fill(COLOR_BG)
 
-        if self.state == self.STATE_HUB:
+        if self.state == self.STATE_SPLASH:
+            self.splash_screen.draw(self.screen)
+
+        elif self.state == self.STATE_HUB:
             self.hub_station.draw(self.screen)
 
         elif self.state in (self.STATE_PLAYING, self.STATE_BOON_DRAFT, self.STATE_PAUSED, self.STATE_GAME_OVER, self.STATE_VICTORY):
@@ -419,6 +554,10 @@ class Game:
                 self._draw_game_over_overlay()
             elif self.state == self.STATE_VICTORY:
                 self._draw_victory_overlay()
+
+        # In-Game Test Mode & Dev Console Overlay (rendered above Hub or active Car)
+        if self.test_mode_active:
+            self.test_mode_menu.draw(self.screen)
 
         if not self.headless:
             pygame.display.flip()
@@ -581,12 +720,24 @@ class Game:
         self.screen.blit(key_prompt, key_prompt.get_rect(center=(btn_rect.centerx, btn_rect.bottom + 14)))
 
     def run(self):
-        """Main game loop."""
+        """Main game loop (Synchronous Native Desktop)."""
         while self.running:
             dt = self.clock.tick(FPS) / 1000.0
             if not self.handle_events():
                 break
             self.update(dt)
             self.render()
+
+        pygame.quit()
+
+    async def run_async(self):
+        """Main game loop for WebAssembly & Asyncio (yields control to browser event loop)."""
+        while self.running:
+            dt = self.clock.tick(FPS) / 1000.0
+            if not self.handle_events():
+                break
+            self.update(dt)
+            self.render()
+            await asyncio.sleep(0)  # Critical for WebAssembly frame rendering
 
         pygame.quit()

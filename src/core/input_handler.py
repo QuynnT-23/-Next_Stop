@@ -16,6 +16,8 @@ class InputHandler:
         self.attack_pressed = False
         self.dash_pressed = False
         self.dash_dir_override = None  # Vector2 if triggered by double-tap
+        self.block_held = False
+        self.block_pressed = False
         self.interact_pressed = False
         self.pause_pressed = False
         
@@ -42,6 +44,7 @@ class InputHandler:
         self.attack_pressed = False
         self.dash_pressed = False
         self.dash_dir_override = None
+        self.block_pressed = False
         self.interact_pressed = False
         self.pause_pressed = False
         self.num_keys_pressed.clear()
@@ -62,9 +65,10 @@ class InputHandler:
                     self.attack_pressed = True
                     self.attack_held = True
 
-                # 2. Shift = Dash fallback
+                # 2. Shift = Block Stance & Parry!
                 elif event.key in (pygame.K_LSHIFT, pygame.K_RSHIFT):
-                    self.dash_pressed = True
+                    self.block_pressed = True
+                    self.block_held = True
 
                 # 3. Double-tap directional keys (WASD / Arrows) to Dash!
                 elif event.key in self.dir_key_vectors:
@@ -78,7 +82,7 @@ class InputHandler:
                     else:
                         self.last_key_press_time[event.key] = now
 
-                # 4. Interact & Pause
+                # 4. Interact & Super Ability ('E' key)
                 elif event.key == pygame.K_e:
                     self.interact_pressed = True
                 elif event.key in (pygame.K_ESCAPE, pygame.K_p):
@@ -95,12 +99,14 @@ class InputHandler:
             elif event.type == pygame.KEYUP:
                 if event.key == pygame.K_SPACE:
                     self.attack_held = False
+                elif event.key in (pygame.K_LSHIFT, pygame.K_RSHIFT):
+                    self.block_held = False
 
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:  # Left click also attacks
                     self.attack_pressed = True
                     self.attack_held = True
-                elif event.button == 3:  # Right click also dashes
+                elif event.button == 3:  # Right click dashes
                     self.dash_pressed = True
 
             elif event.type == pygame.MOUSEBUTTONUP:
@@ -109,6 +115,11 @@ class InputHandler:
                     keys = pygame.key.get_pressed()
                     if not keys[pygame.K_SPACE]:
                         self.attack_held = False
+
+        # Sync continuous keys
+        keys = pygame.key.get_pressed()
+        if keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]:
+            self.block_held = True
 
         # Continuous keys for movement (WASD + Arrow keys)
         keys = pygame.key.get_pressed()

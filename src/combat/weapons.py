@@ -4,7 +4,7 @@ import math
 import random
 from src.config import (
     COLOR_BRASS, COLOR_BRASS_HIGHLIGHT, COLOR_WHITE,
-    COLOR_EMBER_ORANGE, COLOR_LIGHTNING_CYAN
+    COLOR_EMBER_ORANGE, COLOR_LIGHTNING_CYAN, COLOR_CRIT_YELLOW
 )
 from src.entities.projectile import Projectile
 from src.combat.damage import roll_damage
@@ -92,7 +92,7 @@ class RivetGun(Weapon):
 class StokerWrench(Weapon):
     """Heavy industrial melee wrench that cleaves in a wide frontal arc."""
     def __init__(self):
-        super().__init__("Stoker's Cleaver", "Wide melee arc with heavy knockback.", fire_rate=0.45, base_damage=48, sound_name="swing")
+        super().__init__("Stoker's Cleaver", "Wide melee arc with heavy knockback.", fire_rate=0.45, base_damage=62, sound_name="swing")
         self.arc_angle = math.pi * 0.65  # 120 degree cleave
         self.reach = 85.0
 
@@ -108,8 +108,12 @@ class StokerWrench(Weapon):
         aim_vec = aim_vec.normalize()
         aim_angle = math.atan2(aim_vec.y, aim_vec.x)
 
+        # Trigger dynamic melee swing arc animation on player
+        if hasattr(player, "start_melee_swing"):
+            player.start_melee_swing(duration=0.22, aim_angle=aim_angle, arc_span=self.arc_angle)
+
         game_state.audio.play(self.sound_name)
-        game_state.camera.add_trauma(0.18)
+        game_state.camera.add_trauma(0.20)
 
         # Fiery crescent slash arc particles
         game_state.particles.spawn_cleave_fire(player.pos.x, player.pos.y, aim_angle, self.arc_angle, self.reach)
@@ -132,7 +136,11 @@ class StokerWrench(Weapon):
                     push_dir = diff.normalize() if dist > 0 else aim_vec
                     enemy.vel += push_dir * 450.0
                     enemy.take_damage(dmg_event, game_state)
-                    game_state.particles.spawn_sparks(enemy.pos.x, enemy.pos.y, count=10, color=COLOR_WHITE)
+                    # Attack response: hitstop micro-pause & hefty impact juice
+                    if hasattr(enemy, "hitstop_timer"):
+                        enemy.hitstop_timer = 0.05
+                    game_state.camera.add_trauma(0.24)
+                    game_state.particles.spawn_sparks(enemy.pos.x, enemy.pos.y, count=14, color=COLOR_CRIT_YELLOW)
                     game_state.audio.play('hit')
 
         # Check interactive props in melee sector

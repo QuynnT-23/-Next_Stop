@@ -54,6 +54,27 @@ PERK_DEFINITIONS = {
 
 ALL_STAGES = ["steam", "derelict", "subway", "cryo", "infernal"]
 
+SUPER_ABILITIES = {
+    "super_boiler_overdrive": {
+        "id": "super_boiler_overdrive",
+        "name": "Boiler Overdrive",
+        "desc": "360° superheated steam blast. Cleanses bullets, deals 130 damage, grants haste & i-frames.",
+        "unlock_desc": "Unlocked after clearing Track 1 (The Iron Express).",
+    },
+    "super_tesla_rail": {
+        "id": "super_tesla_rail",
+        "name": "Tesla Rail Discharge",
+        "desc": "Piercing hyper-voltage beam cutting full train car length. Deals 280 damage & chains arc lightning.",
+        "unlock_desc": "Unlocked after clearing Track 5 (The Infernal Boiler) the 1st time.",
+    },
+    "super_infernal_cataclysm": {
+        "id": "super_infernal_cataclysm",
+        "name": "Infernal Slag Cataclysm",
+        "desc": "Catastrophic boiler mortar salvo. 6 molten slag shells crash down dealing 400 damage.",
+        "unlock_desc": "Unlocked after clearing Track 5 the 2nd time (Loop 2).",
+    }
+}
+
 class ProgressionManager:
     """Manages persistent Conductor XP, levels, scrap currency, single-track progression, and Loop+ cycles."""
     def __init__(self, save_path=None):
@@ -67,7 +88,17 @@ class ProgressionManager:
         self.perks = {k: 0 for k in PERK_DEFINITIONS}
         self.total_runs = 0
         self.total_bosses_slain = 0
+        self.equipped_super = None
+        self.encountered_enemies = ["ticket_inspector", "ranged_steward", "boiler_imp"]
         self.load()
+
+    def record_enemy_encounter(self, enemy_id: str) -> bool:
+        """Records an enemy encounter in Conductor's Field Log. Returns True if newly recorded."""
+        if enemy_id and enemy_id not in self.encountered_enemies:
+            self.encountered_enemies.append(enemy_id)
+            self.save()
+            return True
+        return False
 
     def get_active_route_id(self) -> str:
         """Returns the ID of the single active available track."""
@@ -196,6 +227,83 @@ class ProgressionManager:
         else:
             player.dash_recovery_mult = 1.0 + self.perks.get("boiler_pressure", 0) * 0.15
 
+    def get_unlocked_supers(self) -> list[str]:
+        """Returns list of unlocked super ability IDs based on track/loop milestone clears."""
+        supers = []
+        # 1. First super unlocked after beating the first level (Track 1)
+        if self.current_track_idx >= 1 or self.loop_count >= 1:
+            supers.append("super_boiler_overdrive")
+        # 2. Second super unlocked after beating the 5th stage the first time
+        if self.loop_count >= 1:
+            supers.append("super_tesla_rail")
+        # 3. Third super unlocked after beating the 5th stage the second time (Loop 2)
+        if self.loop_count >= 2:
+            supers.append("super_infernal_cataclysm")
+        return supers
+
+    def get_equipped_super(self) -> dict | None:
+        """Returns the currently equipped super ability metadata dict, or None if none unlocked."""
+        unlocked = self.get_unlocked_supers()
+        if not unlocked:
+            return None
+        if self.equipped_super in unlocked:
+            return SUPER_ABILITIES[self.equipped_super]
+        # Default to highest unlocked ability
+        return SUPER_ABILITIES[unlocked[-1]]
+
+    def set_equipped_super(self, super_id: str, force: bool = False) -> bool:
+        """Equips an unlocked (or forced in test mode) super ability."""
+        if force or super_id in self.get_unlocked_supers():
+            self.equipped_super = super_id
+            self.save()
+            return True
+        return False
+
+    def set_level(self, new_level: int):
+        """Directly adjust player conductor level for testing."""
+        self.level = max(1, int(new_level))
+        self.xp = 0
+        self.save()
+
+    def set_scrap(self, new_scrap: int):
+        """Directly set player scrap currency for testing."""
+        self.scrap = max(0, int(new_scrap))
+        self.save()
+
+    def set_active_track(self, track_idx: int, loop_count: int = 0):
+        """Directly change active track and loop cycle for testing."""
+        self.current_track_idx = max(0, min(len(ALL_STAGES) - 1, int(track_idx)))
+        self.loop_count = max(0, int(loop_count))
+        self.unlocked_stages = [self.get_active_route_id()]
+        self.save()
+
+    def max_all_perks(self):
+        """Sets all workshop perks to maximum tier for testing."""
+        for perk_id, data in PERK_DEFINITIONS.items():
+            self.perks[perk_id] = data["max_rank"]
+        self.save()
+
+    def reset_all_perks(self):
+        """Resets all workshop perks to zero."""
+        for perk_id in PERK_DEFINITIONS:
+            self.perks[perk_id] = 0
+        self.save()
+
+    def reset_to_fresh(self):
+        """Completely resets progression to a fresh Level 1 save."""
+        self.level = 1
+        self.xp = 0
+        self.scrap = 0
+        self.current_track_idx = 0
+        self.loop_count = 0
+        self.unlocked_stages = ["steam"]
+        self.perks = {k: 0 for k in PERK_DEFINITIONS}
+        self.total_runs = 0
+        self.total_bosses_slain = 0
+        self.equipped_super = None
+        self.encountered_enemies = []
+        self.save()
+
     def save(self):
         data = {
             "level": self.level,
@@ -206,7 +314,9 @@ class ProgressionManager:
             "unlocked_stages": self.unlocked_stages,
             "perks": self.perks,
             "total_runs": self.total_runs,
-            "total_bosses_slain": self.total_bosses_slain
+            "total_bosses_slain": self.total_bosses_slain,
+            "equipped_super": self.equipped_super,
+            "encountered_enemies": self.encountered_enemies
         }
         try:
             with open(self.save_path, 'w', encoding='utf-8') as f:
@@ -231,5 +341,7 @@ class ProgressionManager:
                 self.perks[k] = loaded_perks.get(k, 0)
             self.total_runs = data.get("total_runs", 0)
             self.total_bosses_slain = data.get("total_bosses_slain", 0)
+            self.equipped_super = data.get("equipped_super", None)
+            self.encountered_enemies = data.get("encountered_enemies", ["ticket_inspector", "ranged_steward", "boiler_imp"])
         except Exception as e:
             print(f"Warning: Failed to load progression: {e}")

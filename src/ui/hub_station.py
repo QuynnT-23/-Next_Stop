@@ -13,9 +13,10 @@ from src.combat.weapons import AVAILABLE_WEAPONS
 from src.level.car_generator import TRAIN_ROUTES
 from src.core.progression import ProgressionManager, PERK_DEFINITIONS
 from src.ui.sprite_renderer import draw_stoker_player
+from src.combat.enemy_codex import ENEMY_CODEX_DATA, DummyPreviewCamera, get_all_codex_entries
 
 class HubStation:
-    """Interactive, walkable Grand Central Terminal Hub with docking bays, workshop, and armory."""
+    """Interactive, walkable Grand Central Terminal Hub with docking bays, workshop, armory, and enemy codex."""
     def __init__(self, progression: ProgressionManager = None):
         pygame.font.init()
         self.progression = progression or ProgressionManager()
@@ -68,8 +69,26 @@ class HubStation:
         # Workshop Anvil Station (Left Hall)
         self.workshop_rect = pygame.Rect(110, SCREEN_HEIGHT // 2 - 20, 160, 120)
 
+        # Dispatch Archives / Field Bestiary Desk (Between Workshop and Concourse)
+        self.codex_rect = pygame.Rect(345, SCREEN_HEIGHT // 2 - 20, 160, 120)
+
+        # Dispatch Test Console Terminal (Between Concourse and Armory)
+        self.test_terminal_rect = pygame.Rect(SCREEN_WIDTH - 505, SCREEN_HEIGHT // 2 - 20, 160, 120)
+
         # Armory Racks (Right Hall)
         self.armory_rect = pygame.Rect(SCREEN_WIDTH - 270, SCREEN_HEIGHT // 2 - 20, 160, 120)
+
+        # Top HUD Test Mode Button (safely above north docking gates)
+        self.hud_test_btn_rect = pygame.Rect(SCREEN_WIDTH // 2 - 95, 52, 190, 24)
+        self.request_test_mode = False
+
+        # Enemy Threat Codex Modal State
+        self.show_codex = False
+        self.selected_codex_id = "ticket_inspector"
+        self.codex_category_filter = "ALL"  # "ALL", "Standard", "Mini-Boss", "Climax Boss"
+        self.codex_scroll_offset = 0
+        self.codex_preview_cache = {}
+        self.dummy_preview_camera = DummyPreviewCamera()
 
         # Input / Board buffer
         self.board_cooldown = 0.0
@@ -80,6 +99,8 @@ class HubStation:
         self.player_vel = pygame.math.Vector2(0, 0)
         self.facing_angle = -math.pi / 2
         self.show_workshop = False
+        self.show_codex = False
+        self.request_test_mode = False
         self.is_dashing = False
         self.dash_timer = 0.0
         self.board_cooldown = 0.4
@@ -115,6 +136,49 @@ class HubStation:
                         self._try_buy_perk_by_idx(4)
                     return False
 
+                if self.show_codex:
+                    filtered = self._get_filtered_codex_entries()
+                    cur_idx = 0
+                    for idx, e in enumerate(filtered):
+                        if e["id"] == self.selected_codex_id:
+                            cur_idx = idx
+                            break
+
+                    if event.key in (pygame.K_ESCAPE, pygame.K_e, pygame.K_b):
+                        self.show_codex = False
+                    elif event.key in (pygame.K_UP, pygame.K_w):
+                        if filtered:
+                            new_idx = (cur_idx - 1) % len(filtered)
+                            self.selected_codex_id = filtered[new_idx]["id"]
+                            self.codex_scroll_offset = max(0, min(len(filtered) * 62, (new_idx - 3) * 62))
+                    elif event.key in (pygame.K_DOWN, pygame.K_s):
+                        if filtered:
+                            new_idx = (cur_idx + 1) % len(filtered)
+                            self.selected_codex_id = filtered[new_idx]["id"]
+                            self.codex_scroll_offset = max(0, min(len(filtered) * 62, (new_idx - 3) * 62))
+                    elif event.key in (pygame.K_LEFT, pygame.K_a):
+                        cats = ["ALL", "Standard", "Mini-Boss", "Climax Boss"]
+                        c_i = cats.index(self.codex_category_filter) if self.codex_category_filter in cats else 0
+                        self.codex_category_filter = cats[(c_i - 1) % len(cats)]
+                    elif event.key in (pygame.K_RIGHT, pygame.K_d):
+                        cats = ["ALL", "Standard", "Mini-Boss", "Climax Boss"]
+                        c_i = cats.index(self.codex_category_filter) if self.codex_category_filter in cats else 0
+                        self.codex_category_filter = cats[(c_i + 1) % len(cats)]
+                    elif event.key in (pygame.K_1, pygame.K_KP1):
+                        self.codex_category_filter = "ALL"
+                    elif event.key in (pygame.K_2, pygame.K_KP2):
+                        self.codex_category_filter = "Standard"
+                    elif event.key in (pygame.K_3, pygame.K_KP3):
+                        self.codex_category_filter = "Mini-Boss"
+                    elif event.key in (pygame.K_4, pygame.K_KP4):
+                        self.codex_category_filter = "Climax Boss"
+                    return False
+
+                # Quick codex toggle with [B] anywhere in hub
+                if event.key == pygame.K_b:
+                    self.show_codex = not self.show_codex
+                    return False
+
                 # Quick weapon cycle with 1, 2, 3, 4
                 if event.key in (pygame.K_1, pygame.K_KP1):
                     self._set_weapon(0)
@@ -130,6 +194,16 @@ class HubStation:
                     # Check near workshop
                     if (self.player_pos - pygame.math.Vector2(self.workshop_rect.center)).length() < 130:
                         self.show_workshop = not self.show_workshop
+                        return False
+
+                    # Check near dispatch archives (Enemy Codex)
+                    if (self.player_pos - pygame.math.Vector2(self.codex_rect.center)).length() < 130:
+                        self.show_codex = not self.show_codex
+                        return False
+
+                    # Check near test console terminal desk
+                    if (self.player_pos - pygame.math.Vector2(self.test_terminal_rect.center)).length() < 130:
+                        self.request_test_mode = True
                         return False
 
                     # Check near armory
@@ -157,7 +231,58 @@ class HubStation:
                     if self.hovered_perk_id:
                         self.progression.purchase_perk(self.hovered_perk_id)
                         return False
+                elif self.show_codex:
+                    mw, mh = 1080, 610
+                    mx = (SCREEN_WIDTH - mw) // 2
+                    my = (SCREEN_HEIGHT - mh) // 2
+                    close_btn = pygame.Rect(mx + mw - 45, my + 14, 30, 30)
+                    if close_btn.collidepoint(event.pos):
+                        self.show_codex = False
+                        return False
+
+                    # Check category tabs
+                    tab_cats = ["ALL", "Standard", "Mini-Boss", "Climax Boss"]
+                    cur_tab_x = mx + 25
+                    for cat_key in tab_cats:
+                        t_rect = pygame.Rect(cur_tab_x, my + 54, 150, 28)
+                        if t_rect.collidepoint(event.pos):
+                            self.codex_category_filter = cat_key
+                            self.codex_scroll_offset = 0
+                            return False
+                        cur_tab_x += 158
+
+                    # Check list card clicks
+                    list_rect = pygame.Rect(mx + 25, my + 90, 320, mh - 135)
+                    if list_rect.collidepoint(event.pos):
+                        filtered = self._get_filtered_codex_entries()
+                        for i, entry in enumerate(filtered):
+                            card_y = list_rect.top + 8 + i * 62 - self.codex_scroll_offset
+                            c_rect = pygame.Rect(list_rect.left + 8, card_y, list_rect.width - 16, 56)
+                            if c_rect.collidepoint(event.pos):
+                                self.selected_codex_id = entry["id"]
+                                return False
                 else:
+                    # Click on archives desk to open codex
+                    if self.codex_rect.collidepoint(event.pos):
+                        self.show_codex = True
+                        return False
+
+                    # Click on test console terminal desk or top HUD pill button
+                    if self.test_terminal_rect.collidepoint(event.pos) or self.hud_test_btn_rect.collidepoint(event.pos):
+                        self.request_test_mode = True
+                        return False
+
+                    # Click on workshop anvil
+                    if self.workshop_rect.collidepoint(event.pos):
+                        self.show_workshop = True
+                        return False
+
+                    # Click on armory rack
+                    if self.armory_rect.collidepoint(event.pos):
+                        self.selected_weapon_idx = (self.selected_weapon_idx + 1) % len(self.weapon_classes)
+                        self._set_weapon(self.selected_weapon_idx)
+                        return False
+
                     # Click on gate to board (only single active track is boardable)
                     if self.board_cooldown <= 0.0:
                         for bay in self.docking_bays:
@@ -166,11 +291,20 @@ class HubStation:
                                     self.selected_route_id = bay["route_id"]
                                     return True
 
+            elif event.type == pygame.MOUSEBUTTONDOWN and self.show_codex:
+                if event.button == 4:
+                    self.codex_scroll_offset = max(0, self.codex_scroll_offset - 35)
+                elif event.button == 5:
+                    self.codex_scroll_offset += 35
+
+            elif event.type == pygame.MOUSEWHEEL and self.show_codex:
+                self.codex_scroll_offset = max(0, self.codex_scroll_offset - int(event.y * 35))
+
         # Process movement
         self.update(0.016)
 
         # Auto-board if walking directly into gate threshold (only single active track)
-        if not self.show_workshop and self.board_cooldown <= 0.0:
+        if not self.show_workshop and not self.show_codex and self.board_cooldown <= 0.0:
             for bay in self.docking_bays:
                 if bay["door_rect"].collidepoint(self.player_pos.x, self.player_pos.y):
                     if self.progression.get_track_state(bay["route_id"]) == "active":
@@ -184,7 +318,7 @@ class HubStation:
         if self.board_cooldown > 0.0:
             self.board_cooldown = max(0.0, self.board_cooldown - dt)
 
-        if not self.show_workshop:
+        if not self.show_workshop and not self.show_codex:
             keys = pygame.key.get_pressed()
             move = pygame.math.Vector2(0, 0)
             if keys[pygame.K_w] or keys[pygame.K_UP]:
@@ -342,6 +476,31 @@ class HubStation:
         ws_prompt = self.font_prompt.render("[PRESS E / CLICK]", True, COLOR_CRIT_YELLOW if near_ws else (160, 160, 160))
         surface.blit(ws_prompt, ws_prompt.get_rect(center=(ws.centerx, ws.top + 80)))
 
+        # 4b. Dispatch Archives / Field Bestiary Desk (Between Workshop and Concourse)
+        arch = self.codex_rect
+        near_arch = (self.player_pos - pygame.math.Vector2(arch.center)).length() < 130
+        pygame.draw.rect(surface, (28, 24, 20), arch, border_radius=10)
+        pygame.draw.rect(surface, COLOR_BRASS_HIGHLIGHT if near_arch else COLOR_BRASS, arch, 3 if near_arch else 2, border_radius=10)
+        # Decorative banker's lamp & dossier stacks
+        arch_title = self.font_body.render("DISPATCH ARCHIVES", True, COLOR_BRASS_HIGHLIGHT)
+        surface.blit(arch_title, arch_title.get_rect(center=(arch.centerx, arch.top + 22)))
+        arch_sub = self.font_tag.render("ENEMY THREAT CODEX", True, COLOR_WHITE)
+        surface.blit(arch_sub, arch_sub.get_rect(center=(arch.centerx, arch.top + 45)))
+        arch_prompt = self.font_prompt.render("[PRESS E / B / CLICK]", True, COLOR_CRIT_YELLOW if near_arch else (160, 160, 160))
+        surface.blit(arch_prompt, arch_prompt.get_rect(center=(arch.centerx, arch.top + 80)))
+
+        # 4c. Dispatch Test Console Terminal (Between Concourse and Armory)
+        term = self.test_terminal_rect
+        near_term = (self.player_pos - pygame.math.Vector2(term.center)).length() < 130
+        pygame.draw.rect(surface, (22, 28, 36), term, border_radius=10)
+        pygame.draw.rect(surface, COLOR_BRASS_HIGHLIGHT if near_term else (60, 100, 140), term, 3 if near_term else 2, border_radius=10)
+        term_title = self.font_body.render("TEST CONSOLE", True, COLOR_BRASS_HIGHLIGHT)
+        surface.blit(term_title, term_title.get_rect(center=(term.centerx, term.top + 22)))
+        term_sub = self.font_tag.render("STAGES & CHEATS", True, (130, 220, 255))
+        surface.blit(term_sub, term_sub.get_rect(center=(term.centerx, term.top + 45)))
+        term_prompt = self.font_prompt.render("[PRESS F1 / E / CLICK]", True, COLOR_CRIT_YELLOW if near_term else (160, 160, 160))
+        surface.blit(term_prompt, term_prompt.get_rect(center=(term.centerx, term.top + 80)))
+
         # 5. Armory Racks (Right Hall)
         ar = self.armory_rect
         near_ar = (self.player_pos - pygame.math.Vector2(ar.center)).length() < 130
@@ -398,8 +557,16 @@ class HubStation:
         sub_str = f"ACTIVE EXPEDITION: {active_track_display} ({active_route_name.upper()}){loop_str}"
         sub_col = (255, 220, 110) if self.progression.loop_count >= 1 else (175, 185, 200)
         sub_surf = self.font_tag.render(sub_str, True, sub_col)
-        surface.blit(title_surf, title_surf.get_rect(center=(SCREEN_WIDTH // 2, 26)))
-        surface.blit(sub_surf, sub_surf.get_rect(center=(SCREEN_WIDTH // 2, 48)))
+        surface.blit(title_surf, title_surf.get_rect(center=(SCREEN_WIDTH // 2, 16)))
+        surface.blit(sub_surf, sub_surf.get_rect(center=(SCREEN_WIDTH // 2, 34)))
+
+        # Top HUD Test Mode Button
+        mouse_pos = pygame.mouse.get_pos()
+        hover_test_btn = self.hud_test_btn_rect.collidepoint(mouse_pos)
+        pygame.draw.rect(surface, (30, 48, 65) if hover_test_btn else (20, 28, 38), self.hud_test_btn_rect, border_radius=13)
+        pygame.draw.rect(surface, COLOR_BRASS_HIGHLIGHT if hover_test_btn else (70, 120, 160), self.hud_test_btn_rect, 1, border_radius=13)
+        t_btn_surf = self.font_tag.render("⚡ [F1] TEST & DEV CONSOLE", True, COLOR_WHITE if hover_test_btn else (180, 220, 255))
+        surface.blit(t_btn_surf, t_btn_surf.get_rect(center=self.hud_test_btn_rect.center))
 
         # Scrap Metal Counter (Top Right)
         scrap_bar = pygame.Rect(SCREEN_WIDTH - 220, 16, 200, 48)
@@ -408,14 +575,292 @@ class HubStation:
         sc_lbl = self.font_header.render(f"SCRAP: {self.progression.scrap}", True, (255, 210, 80))
         surface.blit(sc_lbl, (scrap_bar.left + 16, scrap_bar.top + 14))
 
+        # Chud Studios Production Plaque (Art Deco Brass Inlay)
+        plaque_rect = pygame.Rect(SCREEN_WIDTH // 2 - 140, SCREEN_HEIGHT - 52, 280, 20)
+        pygame.draw.rect(surface, (20, 24, 32), plaque_rect, border_radius=4)
+        pygame.draw.rect(surface, COLOR_BRASS, plaque_rect, 1, border_radius=4)
+        plaque_txt = self.font_tag.render("⚡ CHUD STUDIOS PRODUCTION ⚡", True, COLOR_BRASS_HIGHLIGHT)
+        surface.blit(plaque_txt, plaque_txt.get_rect(center=plaque_rect.center))
+
         # Bottom Controls Hint
-        ctrl_str = "[WASD] Move Stoker | [MOUSE] Aim | [1-4] Quick Equip Weapon | [E / STEP IN GATE] Depart on Train | [E AT ANVIL] Workshop Upgrades"
+        ctrl_str = "[WASD] Move Stoker | [MOUSE] Aim | [F1] Test Console | [E AT ARCHIVES / B] Codex | [E AT ANVIL] Workshop | [STEP IN GATE] Depart"
         ctrl_surf = self.font_body.render(ctrl_str, True, (160, 175, 195))
-        surface.blit(ctrl_surf, ctrl_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 22)))
+        surface.blit(ctrl_surf, ctrl_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 18)))
 
         # 8. Render Workshop Modal if open
         if self.show_workshop:
             self._draw_workshop_modal(surface)
+
+        # 9. Render Enemy Codex Modal if open
+        if self.show_codex:
+            self._draw_enemy_codex_modal(surface)
+
+    def _get_filtered_codex_entries(self):
+        all_entries = get_all_codex_entries()
+        if self.codex_category_filter == "ALL":
+            return all_entries
+        elif self.codex_category_filter == "Standard":
+            return [e for e in all_entries if e["category"] in ("Standard", "Elite")]
+        else:
+            return [e for e in all_entries if e["category"] == self.codex_category_filter]
+
+    def _draw_multiline_text(self, surface: pygame.Surface, text: str, x: int, y: int, max_w: int, font: pygame.font.Font, color: tuple, line_spacing: int = 16) -> int:
+        words = text.split(" ")
+        lines = []
+        cur_line = []
+        for word in words:
+            test_line = " ".join(cur_line + [word])
+            if font.size(test_line)[0] <= max_w:
+                cur_line.append(word)
+            else:
+                if cur_line:
+                    lines.append(" ".join(cur_line))
+                cur_line = [word]
+        if cur_line:
+            lines.append(" ".join(cur_line))
+
+        for line in lines:
+            rendered = font.render(line, True, color)
+            surface.blit(rendered, (x, y))
+            y += line_spacing
+        return y
+
+    def _draw_enemy_codex_modal(self, surface: pygame.Surface):
+        # Semi-transparent dark vignette backdrop
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((8, 10, 14, 235))
+        surface.blit(overlay, (0, 0))
+
+        mw, mh = 1080, 610
+        mx = (SCREEN_WIDTH - mw) // 2
+        my = (SCREEN_HEIGHT - mh) // 2
+        m_rect = pygame.Rect(mx, my, mw, mh)
+
+        # Modal outer chassis with Art Deco double border
+        pygame.draw.rect(surface, (18, 22, 30), m_rect, border_radius=12)
+        pygame.draw.rect(surface, (30, 36, 48), m_rect.inflate(-6, -6), border_radius=10)
+        pygame.draw.rect(surface, COLOR_BRASS, m_rect, 3, border_radius=12)
+        pygame.draw.rect(surface, COLOR_BRASS_HIGHLIGHT, m_rect.inflate(-4, -4), 1, border_radius=10)
+
+        # 1. Header Bar
+        all_entries = get_all_codex_entries()
+        encountered_count = len([e for e in all_entries if e["id"] in self.progression.encountered_enemies])
+        
+        t_title = self.font_title.render("✦ CONDUCTOR'S FIELD LOG & THREAT INDEX ✦", True, COLOR_BRASS_HIGHLIGHT)
+        surface.blit(t_title, (mx + 25, my + 18))
+
+        enc_pill = pygame.Rect(mx + mw - 340, my + 16, 280, 28)
+        pygame.draw.rect(surface, (25, 35, 45), enc_pill, border_radius=6)
+        pygame.draw.rect(surface, (60, 190, 255), enc_pill, 1, border_radius=6)
+        enc_text = self.font_tag.render(f"ENCOUNTERED IN FIELD: {encountered_count} / {len(all_entries)} HOSTILES", True, (190, 230, 255))
+        surface.blit(enc_text, enc_text.get_rect(center=enc_pill.center))
+
+        # Close button [X]
+        close_btn = pygame.Rect(mx + mw - 45, my + 14, 30, 30)
+        pygame.draw.rect(surface, (50, 25, 30), close_btn, border_radius=6)
+        pygame.draw.rect(surface, (200, 60, 70), close_btn, 1, border_radius=6)
+        c_x = self.font_header.render("X", True, COLOR_WHITE)
+        surface.blit(c_x, c_x.get_rect(center=close_btn.center))
+
+        # 2. Category Filter Tabs
+        tab_names = [
+            ("ALL", f"ALL ({len(all_entries)})"),
+            ("Standard", "COMMON (6)"),
+            ("Mini-Boss", "MINI-BOSSES (5)"),
+            ("Climax Boss", "CLIMAX BOSSES (5)")
+        ]
+        cur_tab_x = mx + 25
+        mouse_pos = pygame.mouse.get_pos()
+        for cat_key, cat_label in tab_names:
+            is_active = (self.codex_category_filter == cat_key)
+            tab_btn = pygame.Rect(cur_tab_x, my + 54, 150, 28)
+            t_col = (140, 105, 35) if is_active else ((38, 44, 58) if tab_btn.collidepoint(mouse_pos) else (26, 30, 40))
+            pygame.draw.rect(surface, t_col, tab_btn, border_radius=5)
+            pygame.draw.rect(surface, COLOR_BRASS_HIGHLIGHT if is_active else (60, 70, 90), tab_btn, 2 if is_active else 1, border_radius=5)
+            lbl = self.font_tag.render(cat_label, True, COLOR_WHITE if is_active else (180, 190, 205))
+            surface.blit(lbl, lbl.get_rect(center=tab_btn.center))
+            cur_tab_x += 158
+
+        filtered_entries = self._get_filtered_codex_entries()
+        if not any(e["id"] == self.selected_codex_id for e in filtered_entries) and filtered_entries:
+            self.selected_codex_id = filtered_entries[0]["id"]
+
+        # 3. Left Column: Enemy List Cards
+        list_rect = pygame.Rect(mx + 25, my + 90, 320, mh - 135)
+        pygame.draw.rect(surface, (14, 18, 24), list_rect, border_radius=8)
+        pygame.draw.rect(surface, (45, 55, 75), list_rect, 1, border_radius=8)
+
+        card_h = 56
+        gap = 6
+        total_list_h = len(filtered_entries) * (card_h + gap)
+        max_scroll = max(0, total_list_h - list_rect.height)
+        self.codex_scroll_offset = max(0, min(max_scroll, self.codex_scroll_offset))
+
+        surface.set_clip(list_rect)
+        for i, entry in enumerate(filtered_entries):
+            card_y = list_rect.top + 8 + i * (card_h + gap) - self.codex_scroll_offset
+            c_rect = pygame.Rect(list_rect.left + 8, card_y, list_rect.width - 16, card_h)
+            
+            # Skip if outside clip
+            if c_rect.bottom < list_rect.top or c_rect.top > list_rect.bottom:
+                continue
+
+            is_sel = (entry["id"] == self.selected_codex_id)
+            is_enc = (entry["id"] in self.progression.encountered_enemies)
+            is_hover = c_rect.collidepoint(mouse_pos)
+
+            bg_col = (48, 38, 26) if is_sel else ((32, 38, 52) if is_hover else (20, 24, 34))
+            pygame.draw.rect(surface, bg_col, c_rect, border_radius=6)
+            pygame.draw.rect(surface, COLOR_BRASS_HIGHLIGHT if is_sel else ((100, 115, 140) if is_hover else (45, 55, 70)), c_rect, 2 if is_sel else 1, border_radius=6)
+
+            # Left status pill
+            status_pill = pygame.Rect(c_rect.left + 8, c_rect.top + 8, 96, 18)
+            if is_enc:
+                pygame.draw.rect(surface, (18, 48, 28), status_pill, border_radius=4)
+                pygame.draw.rect(surface, (50, 190, 95), status_pill, 1, border_radius=4)
+                s_txt = self.font_tag.render("✓ ENCOUNTERED", True, (80, 240, 140))
+            else:
+                pygame.draw.rect(surface, (45, 34, 16), status_pill, border_radius=4)
+                pygame.draw.rect(surface, (220, 160, 40), status_pill, 1, border_radius=4)
+                s_txt = self.font_tag.render("✦ UNSEEN", True, (255, 205, 90))
+            surface.blit(s_txt, s_txt.get_rect(center=status_pill.center))
+
+            # Category tag pill
+            cat_pill = pygame.Rect(c_rect.right - 88, c_rect.top + 8, 80, 18)
+            pygame.draw.rect(surface, (28, 32, 44), cat_pill, border_radius=4)
+            cat_lbl = self.font_tag.render(entry["category"].upper(), True, (170, 185, 205))
+            surface.blit(cat_lbl, cat_lbl.get_rect(center=cat_pill.center))
+
+            # Enemy Name
+            name_col = COLOR_BRASS_HIGHLIGHT if is_sel else COLOR_WHITE
+            name_surf = self.font_body.render(entry["name"], True, name_col)
+            surface.blit(name_surf, (c_rect.left + 10, c_rect.top + 30))
+
+        surface.set_clip(None)
+
+        # 4. Right Column: Detailed Dossier
+        cur_data = ENEMY_CODEX_DATA.get(self.selected_codex_id, all_entries[0])
+        dossier_rect = pygame.Rect(mx + 360, my + 90, mw - 385, mh - 135)
+        pygame.draw.rect(surface, (16, 20, 28), dossier_rect, border_radius=8)
+        pygame.draw.rect(surface, (45, 55, 75), dossier_rect, 1, border_radius=8)
+
+        # A. Live Preview Box (Observation Chamber)
+        p_box = pygame.Rect(dossier_rect.left + 14, dossier_rect.top + 14, 250, 205)
+        pygame.draw.rect(surface, (10, 13, 18), p_box, border_radius=8)
+        pygame.draw.rect(surface, COLOR_BRASS, p_box, 2, border_radius=8)
+        
+        # Grid/Radar lines
+        cx, cy = p_box.centerx, p_box.centery + 10
+        pygame.draw.circle(surface, (22, 28, 38), (cx, cy), 75, 1)
+        pygame.draw.circle(surface, (22, 28, 38), (cx, cy), 45, 1)
+        pygame.draw.line(surface, (22, 28, 38), (cx - 85, cy), (cx + 85, cy), 1)
+        pygame.draw.line(surface, (22, 28, 38), (cx, cy - 85), (cx, cy + 85), 1)
+
+        # Live Animated Enemy Drawing
+        surface.set_clip(p_box)
+        inst = self.codex_preview_cache.get(cur_data["id"])
+        if not inst:
+            inst = cur_data["factory"](cx, cy)
+            self.codex_preview_cache[cur_data["id"]] = inst
+
+        inst.pos = pygame.math.Vector2(cx, cy)
+        t = pygame.time.get_ticks() * 0.002
+        inst.walk_distance = (pygame.time.get_ticks() * 0.04) % 1000.0
+        inst.facing_angle = math.sin(t * 0.7) * 0.25 + math.pi * 0.5
+        inst.flash_timer = 0.0
+        inst.state = "chase"
+        inst.state_timer = 1.0
+
+        # Draw the animated model!
+        inst.draw(surface, self.dummy_preview_camera)
+        surface.set_clip(None)
+
+        # Top-right status ribbon on preview box
+        is_cur_enc = (cur_data["id"] in self.progression.encountered_enemies)
+        prev_ribbon = pygame.Rect(p_box.left + 6, p_box.top + 6, p_box.width - 12, 22)
+        if is_cur_enc:
+            pygame.draw.rect(surface, (18, 48, 28), prev_ribbon, border_radius=4)
+            r_txt = self.font_tag.render("✓ RECORDED IN FIELD LOG", True, (80, 240, 140))
+        else:
+            pygame.draw.rect(surface, (45, 34, 16), prev_ribbon, border_radius=4)
+            r_txt = self.font_tag.render("✦ UNSEEN RECON INTEL", True, (255, 205, 90))
+        surface.blit(r_txt, r_txt.get_rect(center=prev_ribbon.center))
+
+        # B. Vitals & Profile Panel
+        v_left = p_box.right + 16
+        v_w = dossier_rect.right - v_left - 14
+        
+        # Name & Subtitle
+        name_surf = self.font_title.render(cur_data["name"], True, COLOR_BRASS_HIGHLIGHT)
+        surface.blit(name_surf, (v_left, dossier_rect.top + 14))
+        sub_surf = self.font_body.render(f"— {cur_data['subtitle']}", True, (180, 210, 240))
+        surface.blit(sub_surf, (v_left, dossier_rect.top + 40))
+
+        # Habitat & Threat
+        hab_surf = self.font_tag.render(f"HABITAT: {cur_data['stage']}", True, (210, 180, 140))
+        surface.blit(hab_surf, (v_left, dossier_rect.top + 62))
+
+        # Stars
+        stars_str = "★" * cur_data["threat_stars"] + "☆" * (5 - cur_data["threat_stars"])
+        threat_surf = self.font_tag.render(f"THREAT LEVEL: {stars_str}", True, COLOR_CRIT_YELLOW)
+        surface.blit(threat_surf, (v_left, dossier_rect.top + 80))
+
+        # Vitals Pill Box
+        vitals_bar = pygame.Rect(v_left, dossier_rect.top + 102, v_w, 32)
+        pygame.draw.rect(surface, (22, 28, 38), vitals_bar, border_radius=6)
+        pygame.draw.rect(surface, (50, 60, 80), vitals_bar, 1, border_radius=6)
+        vit_txt = self.font_tag.render(
+            f"BASE HEALTH: {cur_data['base_health']} HP   |   SPEED: {cur_data['base_speed']:.0f} px/s   |   TIER: {cur_data['category'].upper()}",
+            True, COLOR_WHITE
+        )
+        surface.blit(vit_txt, vit_txt.get_rect(center=vitals_bar.center))
+
+        # Lore Quote Box
+        lore_box = pygame.Rect(v_left, dossier_rect.top + 142, v_w, 75)
+        pygame.draw.rect(surface, (18, 22, 30), lore_box, border_radius=6)
+        pygame.draw.rect(surface, (40, 50, 65), lore_box, 1, border_radius=6)
+        l_hdr = self.font_tag.render("CONDUCTOR DISPATCH NOTE:", True, (150, 175, 205))
+        surface.blit(l_hdr, (lore_box.left + 10, lore_box.top + 6))
+        self._draw_multiline_text(
+            surface, f'"{cur_data["lore"]}"',
+            lore_box.left + 10, lore_box.top + 24,
+            lore_box.width - 20, self.font_tag, (190, 205, 225), line_spacing=15
+        )
+
+        # C. Bottom Section: Attack Patterns & Behaviors
+        atk_top_y = dossier_rect.top + 230
+        pygame.draw.line(surface, (45, 55, 75), (dossier_rect.left + 14, atk_top_y), (dossier_rect.right - 14, atk_top_y), 1)
+
+        atk_hdr = self.font_header.render("✦ RECONNAISSANCE ATTACK PATTERNS & BEHAVIORS ✦", True, COLOR_BRASS_HIGHLIGHT)
+        surface.blit(atk_hdr, (dossier_rect.left + 14, atk_top_y + 10))
+
+        cur_atk_y = atk_top_y + 36
+        for atk in cur_data["attacks"]:
+            a_title = self.font_body.render(f"• {atk['name']}  [{atk['type'].upper()}]", True, COLOR_WHITE)
+            surface.blit(a_title, (dossier_rect.left + 14, cur_atk_y))
+            cur_atk_y += 18
+            cur_atk_y = self._draw_multiline_text(
+                surface, atk["desc"],
+                dossier_rect.left + 26, cur_atk_y,
+                dossier_rect.width - 50, self.font_tag, (175, 190, 210), line_spacing=15
+            )
+            cur_atk_y += 6
+
+        # Tactical Counter-Measures Box
+        tact_box = pygame.Rect(dossier_rect.left + 14, dossier_rect.bottom - 60, dossier_rect.width - 28, 48)
+        pygame.draw.rect(surface, (36, 30, 20), tact_box, border_radius=6)
+        pygame.draw.rect(surface, COLOR_BRASS, tact_box, 1, border_radius=6)
+        t_hdr = self.font_tag.render("TACTICAL ADVICE:", True, COLOR_CRIT_YELLOW)
+        surface.blit(t_hdr, (tact_box.left + 10, tact_box.top + 6))
+        self._draw_multiline_text(
+            surface, cur_data["tactics"],
+            tact_box.left + 10, tact_box.top + 22,
+            tact_box.width - 20, self.font_tag, (230, 240, 255), line_spacing=14
+        )
+
+        # 5. Footer Hint
+        f_hint = self.font_body.render("[↑/↓] Select Hostile | [←/→] Filter Category | [CLICK] Inspect | [ESC / E / B] Close Codex", True, (160, 180, 205))
+        surface.blit(f_hint, f_hint.get_rect(center=(mx + mw // 2, my + mh - 16)))
 
     def _draw_workshop_modal(self, surface: pygame.Surface):
         # Dark backdrop

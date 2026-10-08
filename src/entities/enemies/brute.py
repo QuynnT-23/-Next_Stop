@@ -118,7 +118,7 @@ class FireHazard:
 class BoilerBrute(BaseEnemy):
     """Heavy ironclad juggernaut wielding a colossal steam-piston sledgehammer."""
     def __init__(self, x: float, y: float):
-        super().__init__(x, y, radius=32, max_health=250, speed=105.0, name="Boiler Brute")
+        super().__init__(x, y, radius=34, max_health=340, speed=115.0, name="Boiler Brute")
         self.attack_range = 80.0
         self.slam_windup = 0.70
         self.cooldown_duration = 1.10
@@ -204,7 +204,7 @@ class BoilerBrute(BaseEnemy):
 class FurnaceGolem(BaseEnemy):
     """Molten coal brute that lobs burning fire globules, coating the deck in flame patches."""
     def __init__(self, x: float, y: float):
-        super().__init__(x, y, radius=26, max_health=240, speed=120.0, name="Furnace Golem")
+        super().__init__(x, y, radius=36, max_health=340, speed=120.0, name="Furnace Golem")
         self.lob_cooldown = 2.4
         self.state_timer = 1.0
 
