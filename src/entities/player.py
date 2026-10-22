@@ -6,6 +6,7 @@ from src.entities.base import Entity
 from src.combat.damage import DamageEvent
 from src.combat.weapons import RivetGun
 from src.ui.sprite_renderer import draw_stoker_player
+from src.ui.animator import FrameAnimator, build_player_clips
 from src.config import (
     PLAYER_RADIUS, PLAYER_BASE_SPEED, PLAYER_ACCELERATION,
     PLAYER_DASH_SPEED, PLAYER_DASH_DURATION, PLAYER_DASH_COOLDOWN,
@@ -67,6 +68,7 @@ class Player(Entity):
         self.god_mode = False
 
         # Animation & Visuals
+        self.animator = FrameAnimator(build_player_clips())
         self.walk_distance = 0.0
         self.recoil_timer = 0.0
         
@@ -98,6 +100,7 @@ class Player(Entity):
         self.melee_swing_timer = duration
         self.melee_swing_aim = aim_angle
         self.melee_swing_arc = arc_span
+        self.animator.play("melee", force=True)
 
     @property
     def is_melee_swinging(self) -> bool:
@@ -204,6 +207,7 @@ class Player(Entity):
         self.is_dashing = True
         self.dash_timer = PLAYER_DASH_DURATION
         self.invulnerable_timer = PLAYER_DASH_DURATION + 0.06  # i-frames!
+        self.animator.play("dash", force=True)
         
         # Determine dash direction: override if provided (e.g. double-tap WASD)
         if dir_override and dir_override.length_squared() > 0:
@@ -264,7 +268,12 @@ class Player(Entity):
         if not super().take_damage(damage_event, game_state):
             return False
 
+        self.animator.play("hit", force=True)
         game_state.camera.add_trauma(0.3)
+        if hasattr(game_state.camera, "trigger_chromatic"):
+            game_state.camera.trigger_chromatic(0.12)
+        if hasattr(game_state, "hud") and hasattr(game_state.hud, "trigger_damage_flash"):
+            game_state.hud.trigger_damage_flash()
         game_state.audio.play('hit')
 
         for boon in self.boons:
@@ -386,6 +395,12 @@ class Player(Entity):
         if self.vel.length_squared() > 100.0:
             self.walk_distance += self.vel.length() * dt
 
+        # Update procedural skeletal keyframe animation
+        is_moving_anim = self.vel.length_squared() > 100.0
+        loco = "walk" if is_moving_anim else "idle"
+        speed_ratio = (self.vel.length() / max(1.0, self.base_speed)) if is_moving_anim else 1.0
+        self.animator.update(dt, locomotion=loco, speed_scale=speed_ratio)
+
     def draw(self, surface: pygame.Surface, camera):
         screen_pos = camera.apply(self.pos)
         is_moving = self.vel.length_squared() > 200.0
@@ -406,5 +421,6 @@ class Player(Entity):
             parry_flash_timer=self.parry_flash_timer,
             melee_swing_timer=self.melee_swing_timer,
             melee_swing_duration=self.melee_swing_duration,
-            melee_swing_arc=self.melee_swing_arc
+            melee_swing_arc=self.melee_swing_arc,
+            pose=self.animator.pose
         )

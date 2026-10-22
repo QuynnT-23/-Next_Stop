@@ -369,6 +369,7 @@ class Game:
             self.run_duration_sec = (pygame.time.get_ticks() - self.run_start_ticks) / 1000.0
             self.train_car.update(dt, self.player, self.enemies, self)
             self.camera.update(dt, self.player.pos)
+            self.hud.update(dt)
             self.player.update(dt, self.input_handler, self.train_car, self)
             
             # Check player death
@@ -404,6 +405,8 @@ class Game:
             # Update enemies
             for enemy in self.enemies:
                 enemy.update(dt, self.player, self.train_car, self)
+                if hasattr(enemy, "update_animator"):
+                    enemy.update_animator(dt)
             # Filter dead enemies and grant XP / Scrap
             alive_enemies = []
             for e in self.enemies:
@@ -416,6 +419,8 @@ class Game:
                     self.earned_xp += base_xp
                     self.progression.gain_scrap(1)
                     self.earned_scrap += 1
+                    if hasattr(self.hud, "register_kill"):
+                        self.hud.register_kill()
             self.enemies = alive_enemies
 
             # Check if train car is cleared!
@@ -600,6 +605,10 @@ class Game:
 
             # 8. Particles & Combat Text
             self.particles.draw(self.screen, self.camera)
+
+            # Chromatic Aberration Screen Filter (on heavy impact)
+            if hasattr(self.camera, "draw_chromatic_overlay"):
+                self.camera.draw_chromatic_overlay(self.screen)
 
             # 9. HUD
             # Look for active boss

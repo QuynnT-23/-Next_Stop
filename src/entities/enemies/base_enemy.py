@@ -5,6 +5,7 @@ import random
 from src.entities.base import Entity
 from src.combat.damage import DamageEvent
 from src.config import COLOR_WHITE, COLOR_EMBER_ORANGE
+from src.ui.animator import FrameAnimator, build_enemy_clips
 
 class BaseEnemy(Entity):
     """Base class for all enemy types with state-machine AI."""
@@ -27,6 +28,9 @@ class BaseEnemy(Entity):
         # Elite enemy attributes
         self.is_elite = False
         self.elite_modifier = None
+
+        # Procedural skeletal keyframe animator
+        self.animator = FrameAnimator(build_enemy_clips())
 
     def make_elite(self, modifier: str = None):
         """Elevates this enemy to an Elite variant with bonus stats and modifier behavior."""
@@ -87,13 +91,32 @@ class BaseEnemy(Entity):
             force /= count
         return force
 
+    def update_animator(self, dt: float):
+        """Advances keyframe animation state machine based on current AI state."""
+        if not hasattr(self, "animator") or self.animator is None:
+            return
+        
+        is_moving = self.vel.length_squared() > 10.0
+        if self.state == self.STATE_WINDUP:
+            self.animator.play("windup")
+            self.animator.update(dt)
+        elif self.state == self.STATE_ATTACK:
+            self.animator.play("attack")
+            self.animator.update(dt)
+        else:
+            loco = "walk" if is_moving else "idle"
+            speed_ratio = (self.vel.length() / max(1.0, self.base_speed)) if is_moving else 1.0
+            self.animator.update(dt, locomotion=loco, speed_scale=speed_ratio)
+
     def take_damage(self, damage_event, game_state):
         applied = super().take_damage(damage_event, game_state)
-        if applied and damage_event.source_type == "player":
-            if hasattr(game_state, "damage_dealt"):
-                game_state.damage_dealt += damage_event.amount
-            if hasattr(game_state, "player") and game_state.player and hasattr(game_state.player, "add_super_charge"):
-                game_state.player.add_super_charge(damage_event.amount * 0.35)
+        if applied:
+            self.animator.play("hit", force=True)
+            if damage_event.source_type == "player":
+                if hasattr(game_state, "damage_dealt"):
+                    game_state.damage_dealt += damage_event.amount
+                if hasattr(game_state, "player") and game_state.player and hasattr(game_state.player, "add_super_charge"):
+                    game_state.player.add_super_charge(damage_event.amount * 0.35)
         return applied
 
     def die(self, game_state):

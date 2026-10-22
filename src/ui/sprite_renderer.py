@@ -44,19 +44,67 @@ def draw_stoker_player(surface: pygame.Surface, screen_pos: tuple, aim_angle: fl
                        radius: float = 22.0, is_blocking: bool = False,
                        block_timer: float = 0.0, parry_flash_timer: float = 0.0,
                        melee_swing_timer: float = 0.0, melee_swing_duration: float = 0.22,
-                       melee_swing_arc: float = math.pi * 0.65):
-    """Renders the rugged train stoker hero with dynamic melee swings, defensive guard stances, dirty shirt, burly arms, pants, boots, and held weapon."""
+                       melee_swing_arc: float = math.pi * 0.65,
+                       pose: dict = None):
+    """Renders the rugged train stoker hero with procedural skeletal keyframe animation, dynamic melee swings, defensive guard stances, dirty shirt, burly arms, pants, boots, and held weapon."""
     cx, cy = int(screen_pos[0]), int(screen_pos[1])
     
-    # Idle breathing bobbing & weight-shift (braced and lowered when blocking)
-    ticks = pygame.time.get_ticks()
-    breath_bob = math.sin(ticks * 0.005) * 1.5 if (not is_moving and not is_blocking) else 0.0
-    breath_sway = math.cos(ticks * 0.003) * 0.8 if (not is_moving and not is_blocking) else 0.0
-    lean_x = math.cos(aim_angle) * 2.5 if is_moving else 0.0
-    lean_y = math.sin(aim_angle) * 2.5 if is_moving else 0.0
+    # Direction vectors
+    aim_cos = math.cos(aim_angle)
+    aim_sin = math.sin(aim_angle)
+    perp_cos = -aim_sin
+    perp_sin = aim_cos
 
-    cx += int(breath_sway + lean_x)
+    # Procedural Skeletal Keyframe Animation Channels
+    ticks = pygame.time.get_ticks()
+    if pose:
+        hip_sway = pose.get("hip_sway", 0.0)
+        body_bob = pose.get("body_bob", 0.0)
+        head_bob = pose.get("head_bob", 0.0)
+        arm_l = pose.get("arm_l", 0.0)
+        arm_r = pose.get("arm_r", 0.0)
+        foot_l = pose.get("foot_l", 0.0)
+        foot_r = pose.get("foot_r", 0.0)
+        weapon_bob = pose.get("weapon_bob", 0.0)
+        lean = pose.get("lean", 0.0)
+        squash = pose.get("squash", 0.0)
+        twist = pose.get("twist", 0.0)
+        blur = pose.get("blur", 0.0)
+
+        breath_bob = body_bob
+        breath_sway = hip_sway
+        lean_x = aim_cos * lean
+        lean_y = aim_sin * lean
+        left_boot_offset = foot_l
+        right_boot_offset = foot_r
+    else:
+        breath_bob = math.sin(ticks * 0.005) * 1.5 if (not is_moving and not is_blocking) else 0.0
+        breath_sway = math.cos(ticks * 0.003) * 0.8 if (not is_moving and not is_blocking) else 0.0
+        lean_x = math.cos(aim_angle) * 2.5 if is_moving else 0.0
+        lean_y = math.sin(aim_angle) * 2.5 if is_moving else 0.0
+        stride = math.sin(walk_dist * 0.22) * 8.0 if is_moving else 0.0
+        left_boot_offset = stride
+        right_boot_offset = -stride
+        head_bob = 0.0
+        arm_l = 0.0
+        arm_r = 0.0
+        weapon_bob = 0.0
+        squash = 0.0
+        twist = 0.0
+        blur = 0.0
+
+    cx += int(perp_cos * breath_sway + lean_x)
     cy += int(breath_bob + lean_y) + (2 if is_blocking else 0)
+
+    # Motion Blur / Dash Streak Ghost
+    if blur > 0.05:
+        streak_dist = blur * 16.0
+        streak_x = cx - int(aim_cos * streak_dist)
+        streak_y = cy - int(aim_sin * streak_dist)
+        ghost_alpha = int(120 * blur)
+        ghost_surf = pygame.Surface((int(radius * 2.6), int(radius * 2.6)), pygame.SRCALPHA)
+        pygame.draw.circle(ghost_surf, (100, 200, 255, ghost_alpha), (int(radius * 1.3), int(radius * 1.3)), int(radius * 0.72))
+        surface.blit(ghost_surf, (streak_x - int(radius * 1.3), streak_y - int(radius * 1.3)))
 
     # 1. Soft Oval Drop Shadow (widened when braced for block)
     shadow_w = int(radius * (2.4 if is_blocking else 2.1))
@@ -65,12 +113,6 @@ def draw_stoker_player(surface: pygame.Surface, screen_pos: tuple, aim_angle: fl
     pygame.draw.ellipse(shadow_surf, (0, 0, 0, 95), (0, 0, shadow_w, shadow_h))
     surface.blit(shadow_surf, (cx - shadow_w // 2, cy + int(radius * 0.45) - int(breath_bob)))
 
-    # Direction vectors
-    aim_cos = math.cos(aim_angle)
-    aim_sin = math.sin(aim_angle)
-    perp_cos = -aim_sin
-    perp_sin = aim_cos
-
     # Recoil offset on arms & weapon
     recoil = max(0.0, recoil_timer * 18.0)
     recoil_x = -aim_cos * recoil
@@ -78,14 +120,14 @@ def draw_stoker_player(surface: pygame.Surface, screen_pos: tuple, aim_angle: fl
 
     # Dynamic Melee Weapon Angle & Slash Trail
     if is_blocking:
-        weapon_angle = aim_angle + math.pi * 0.45
+        weapon_angle = aim_angle + math.pi * 0.45 + twist
     elif melee_swing_timer > 0:
         swing_prog = 1.0 - (melee_swing_timer / max(0.01, melee_swing_duration))
         swing_curve = math.sin(swing_prog * math.pi - math.pi * 0.5) * 0.5 + 0.5
         swing_offset = (swing_curve - 0.5) * melee_swing_arc * 1.6
-        weapon_angle = aim_angle + swing_offset
+        weapon_angle = aim_angle + swing_offset + twist
     else:
-        weapon_angle = aim_angle
+        weapon_angle = aim_angle + twist
 
     wpn_cos = math.cos(weapon_angle)
     wpn_sin = math.sin(weapon_angle)
@@ -165,10 +207,10 @@ def draw_stoker_player(surface: pygame.Surface, screen_pos: tuple, aim_angle: fl
         l_shoulder_y = cy + perp_sin * 13.0
         r_shoulder_x = cx - perp_cos * 13.0
         r_shoulder_y = cy - perp_sin * 13.0
-        l_hand_x = cx + aim_cos * 16.0 + perp_cos * 6.0 + recoil_x
-        l_hand_y = cy + aim_sin * 16.0 + perp_sin * 6.0 + recoil_y
-        r_hand_x = cx + aim_cos * 18.0 - perp_cos * 4.0 + recoil_x
-        r_hand_y = cy + aim_sin * 18.0 - perp_sin * 4.0 + recoil_y
+        l_hand_x = cx + aim_cos * (16.0 + arm_l) + perp_cos * 6.0 + recoil_x
+        l_hand_y = cy + aim_sin * (16.0 + arm_l) + perp_sin * 6.0 + recoil_y
+        r_hand_x = cx + aim_cos * (18.0 + arm_r) - perp_cos * 4.0 + recoil_x
+        r_hand_y = cy + aim_sin * (18.0 + arm_r) - perp_sin * 4.0 + recoil_y
 
     pygame.draw.circle(surface, shadow_arm, (int(l_shoulder_x), int(l_shoulder_y)), 6)
     pygame.draw.line(surface, arm_color, (int(l_shoulder_x), int(l_shoulder_y)), (int(l_hand_x), int(l_hand_y)), 7)
@@ -197,11 +239,11 @@ def draw_stoker_player(surface: pygame.Surface, screen_pos: tuple, aim_angle: fl
 
     # 7. Held Weapon Sprite (Held firmly in burly hands with dynamic angle)
     wpn_base_x = cx + wpn_cos * 15.0 + recoil_x
-    wpn_base_y = cy + wpn_sin * 15.0 + recoil_y
+    wpn_base_y = cy + wpn_sin * 15.0 + recoil_y + int(weapon_bob)
     draw_held_weapon(surface, (wpn_base_x, wpn_base_y), weapon_angle, weapon, recoil_timer)
 
     # 8. Rugged Stoker Head, Flat Cap & Welding Goggles
-    head_y = cy - 6
+    head_y = cy - 6 + int(head_bob)
     head_color = COLOR_WHITE if flash_timer > 0 else COLOR_STOKER_SKIN
     pygame.draw.circle(surface, head_color, (cx, head_y), 9)
 

@@ -1,4 +1,9 @@
-"""Particle systems and floating damage numbers for combat juice."""
+"""Particle systems and floating damage numbers for combat juice.
+
+Extended with: muzzle flashes, shell casings, oil splats, footstep dust,
+death burst scrap, steam vents, rain streaks, damage vignette, and
+screen-space overlay effects.
+"""
 import pygame
 import random
 import math
@@ -7,6 +12,10 @@ from src.config import (
     COLOR_EMBER_ORANGE, COLOR_HEALTH_GREEN, COLOR_STEAM_WHITE,
     COLOR_BRASS, COLOR_BRASS_HIGHLIGHT
 )
+
+# Pre-baked sinusoidal lookup for shell casing spin (performance)
+_SIN_TABLE = [math.sin(math.radians(i)) for i in range(360)]
+_COS_TABLE = [math.cos(math.radians(i)) for i in range(360)]
 
 class DamageNumber:
     """Floating combat text showing damage dealt or healed."""
@@ -90,12 +99,14 @@ class Particle:
         self.vel *= (self.drag ** (dt * 60))
         self.pos += self.vel * dt
         self.radius = max(1.0, self.max_radius * (self.lifetime / self.max_lifetime))
+        # Advance spin
+        if hasattr(self, "spin_deg"):
+            self.spin_deg = (self.spin_deg + self.spin_speed * dt) % 360
         return True
 
     def draw(self, surface: pygame.Surface, camera):
         screen_pos = camera.apply(self.pos)
         progress = self.lifetime / self.max_lifetime
-        alpha = int(255 * progress)
         
         # Fast render using circle or rectangle
         r = int(self.radius)
@@ -110,6 +121,57 @@ class Particle:
         elif self.shape == "square":
             rect = pygame.Rect(screen_pos[0] - r, screen_pos[1] - r, r * 2, r * 2)
             pygame.draw.rect(surface, self.color, rect)
+        elif self.shape == "casing":
+            # Spinning brass rectangle (shell casing)
+            deg = int(getattr(self, "spin_deg", 0)) % 360
+            c = _COS_TABLE[deg]
+            s = _SIN_TABLE[deg]
+            hw, hh = r + 3, max(1, r - 1)
+            pts = [
+                (screen_pos[0] + c * hw - s * hh, screen_pos[1] + s * hw + c * hh),
+                (screen_pos[0] - c * hw - s * hh, screen_pos[1] - s * hw + c * hh),
+                (screen_pos[0] - c * hw + s * hh, screen_pos[1] - s * hw - c * hh),
+                (screen_pos[0] + c * hw + s * hh, screen_pos[1] + s * hw - c * hh),
+            ]
+            alpha = int(255 * progress)
+            col = (min(255, self.color[0]), min(255, self.color[1]), min(255, self.color[2]))
+            if alpha < 200:
+                # Draw with fading: blit onto temp surface
+                tmp = pygame.Surface((hw * 4 + 8, hh * 4 + 8), pygame.SRCALPHA)
+                shifted = [(p[0] - screen_pos[0] + hw * 2 + 4, p[1] - screen_pos[1] + hh * 2 + 4) for p in pts]
+                pygame.draw.polygon(tmp, (*col, alpha), shifted)
+                surface.blit(tmp, (screen_pos[0] - hw * 2 - 4, screen_pos[1] - hh * 2 - 4))
+            else:
+                pygame.draw.polygon(surface, col, [(int(p[0]), int(p[1])) for p in pts])
+        elif self.shape == "splat":
+            # Oil/blood splat — flat circle that fades slowly
+            alpha = int(200 * progress)
+            tmp = pygame.Surface((r * 2 + 2, r * 2 + 2), pygame.SRCALPHA)
+            pygame.draw.ellipse(tmp, (*self.color, alpha), (0, 0, r * 2 + 2, max(2, r)))
+            surface.blit(tmp, (screen_pos[0] - r - 1, screen_pos[1] - r // 2))
+        elif self.shape == "dust":
+            # Footstep puff — soft circle with fast alpha fade
+            alpha = int(160 * progress * progress)
+            tmp = pygame.Surface((r * 2 + 2, r * 2 + 2), pygame.SRCALPHA)
+            pygame.draw.circle(tmp, (*self.color, alpha), (r + 1, r + 1), r)
+            surface.blit(tmp, (screen_pos[0] - r - 1, screen_pos[1] - r - 1))
+        elif self.shape == "flash":
+            # Muzzle flash ring — expands outward rapidly
+            alpha = int(255 * (progress ** 0.4))
+            if r > 1:
+                tmp = pygame.Surface((r * 2 + 4, r * 2 + 4), pygame.SRCALPHA)
+                pygame.draw.circle(tmp, (*self.color, alpha), (r + 2, r + 2), r, max(1, r // 3))
+                surface.blit(tmp, (screen_pos[0] - r - 2, screen_pos[1] - r - 2))
+        elif self.shape == "rain":
+            # Rain streak — thin diagonal line
+            length = r * 6
+            ex = screen_pos[0] + int(self.vel.x * 0.015)
+            ey = screen_pos[1] + length
+            alpha = int(180 * progress)
+            tmp = pygame.Surface((abs(ex - screen_pos[0]) + 4, length + 4), pygame.SRCALPHA)
+            pygame.draw.line(tmp, (*self.color, alpha),
+                             (2, 0), (ex - screen_pos[0] + 2, length), 1)
+            surface.blit(tmp, (min(screen_pos[0], ex) - 2, screen_pos[1]))
         else:
             pygame.draw.circle(surface, self.color, screen_pos, r)
 
@@ -123,6 +185,17 @@ class ParticleManager:
         pygame.font.init()
         self.font_normal = pygame.font.SysFont("Helvetica, Arial, sans-serif", 16, bold=True)
         self.font_crit = pygame.font.SysFont("Helvetica, Arial, sans-serif", 24, bold=True)
+
+        # Screen-space overlay effects (drawn separately, no camera transform)
+        self._damage_vignette_timer = 0.0
+        self._damage_vignette_color = (200, 30, 30)
+        self._hit_freeze_timer = 0.0          # sub-frame hitstop
+        self._screen_flash_timer = 0.0        # full-screen white flash
+        self._screen_flash_color = (255, 255, 255)
+
+        # Cached surfaces for performance
+        self._vignette_surf: pygame.Surface | None = None
+        self._last_screen_size: tuple = (0, 0)
 
     def spawn_sparks(self, x: float, y: float, count: int = 8, color: tuple = (255, 200, 50), speed: float = 260.0):
         """Spawns energetic spark lines when bullets hit or metal strikes."""

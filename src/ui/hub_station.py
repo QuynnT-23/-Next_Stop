@@ -13,6 +13,7 @@ from src.combat.weapons import AVAILABLE_WEAPONS, create_weapon_by_id
 from src.level.car_generator import TRAIN_ROUTES
 from src.core.progression import ProgressionManager, PERK_DEFINITIONS
 from src.ui.sprite_renderer import draw_stoker_player
+from src.ui.animator import FrameAnimator, build_player_clips
 from src.combat.enemy_codex import ENEMY_CODEX_DATA, DummyPreviewCamera, get_all_codex_entries
 from src.ui.weapon_upgrade_menu import WeaponUpgradeMenu
 from src.ui.dev_mode import SecretKeypad
@@ -38,6 +39,7 @@ class HubStation:
         self.facing_angle = -math.pi / 2  # Looking north toward train gates
         self.is_dashing = False
         self.dash_timer = 0.0
+        self.player_animator = FrameAnimator(build_player_clips())
 
         # Weapons
         self.weapon_classes = AVAILABLE_WEAPONS
@@ -379,6 +381,11 @@ class HubStation:
             self.player_pos.x = max(70, min(SCREEN_WIDTH - 70, self.player_pos.x))
             self.player_pos.y = max(190, min(SCREEN_HEIGHT - 60, self.player_pos.y))
 
+        # Advance player procedural skeletal animation
+        is_moving_anim = self.player_vel.length_squared() > 100.0
+        loco = "walk" if is_moving_anim else "idle"
+        self.player_animator.update(dt, locomotion=loco)
+
     def _set_weapon(self, idx: int):
         self.selected_weapon_idx = idx
         wpn_id = self.weapon_classes[idx]().id
@@ -567,7 +574,8 @@ class HubStation:
             attack_boost_timer=0.0,
             flash_timer=0.0,
             invuln_timer=0.0,
-            radius=22.0
+            radius=22.0,
+            pose=self.player_animator.pose
         )
 
         # 7. Station Status Header (Top Left / Right Badges & Center Marquee)

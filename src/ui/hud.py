@@ -18,6 +18,46 @@ class HUD:
         self.font_boss = pygame.font.SysFont("Helvetica, Arial, sans-serif", 20, bold=True)
         self.font_status = pygame.font.SysFont("Helvetica, Arial, sans-serif", 15, bold=True)
 
+        # Ghost health bar
+        self.ghost_health = 100.0
+        self.ghost_decay = 30.0
+
+        # Combo counter
+        self.combo_count = 0
+        self.combo_timer = 0.0
+        self.combo_reset_time = 2.5
+        self._combo_scale = 1.0
+
+        # Damage flash vignette
+        self.damage_flash_timer = 0.0
+
+    def update(self, dt: float):
+        """Tick HUD timers each frame."""
+        # Combo timer
+        if self.combo_count > 0:
+            self.combo_timer += dt
+            if self.combo_timer >= self.combo_reset_time:
+                self.combo_count = 0
+                self.combo_timer = 0.0
+                self._combo_scale = 1.0
+        # Combo scale bounce back toward 1.0
+        if self._combo_scale > 1.0:
+            self._combo_scale = max(1.0, self._combo_scale - 4.0 * dt)
+
+        # Damage flash decay
+        if self.damage_flash_timer > 0.0:
+            self.damage_flash_timer = max(0.0, self.damage_flash_timer - dt)
+
+    def register_kill(self):
+        """Register an enemy kill for the combo counter."""
+        self.combo_count += 1
+        self.combo_timer = 0.0
+        self._combo_scale = 1.35
+
+    def trigger_damage_flash(self):
+        """Trigger a red edge vignette flash to indicate damage taken."""
+        self.damage_flash_timer = 0.4
+
     def draw(self, surface: pygame.Surface, player, run_manager, enemies: list = None, train_car = None, camera = None, boss = None):
         # 1. Health Bar (Top-Left)
         bar_x = 30
@@ -29,9 +69,19 @@ class HUD:
         pygame.draw.rect(surface, COLOR_STEEL_DARK, (bar_x - 4, bar_y - 4, bar_w + 8, bar_h + 8), border_radius=6)
         pygame.draw.rect(surface, COLOR_BRASS, (bar_x - 4, bar_y - 4, bar_w + 8, bar_h + 8), 2, border_radius=6)
         pygame.draw.rect(surface, COLOR_HEALTH_BG, (bar_x, bar_y, bar_w, bar_h), border_radius=4)
-        
-        # Health Fill
+
+        # Ghost health bar (drawn behind green fill)
         health_pct = max(0.0, min(1.0, player.health / player.max_health))
+        if player.health < self.ghost_health:
+            self.ghost_health = max(float(player.health), self.ghost_health - self.ghost_decay * (1 / 60))
+        else:
+            self.ghost_health = float(player.health)
+        ghost_pct = max(0.0, min(1.0, self.ghost_health / player.max_health))
+        ghost_w = int(bar_w * ghost_pct)
+        if ghost_w > 0:
+            pygame.draw.rect(surface, (180, 90, 20), (bar_x, bar_y, ghost_w, bar_h), border_radius=4)
+
+        # Health Fill
         fill_w = int(bar_w * health_pct)
         if fill_w > 0:
             pygame.draw.rect(surface, COLOR_HEALTH_GREEN, (bar_x, bar_y, fill_w, bar_h), border_radius=4)
@@ -96,6 +146,16 @@ class HUD:
                 pygame.draw.rect(surface, (255, 195, 45), (bar_x, super_y, s_bar_w, s_bar_h), border_radius=3)
                 super_txt = self.font_small.render("[E] SUPER READY!", True, (20, 20, 24))
                 surface.blit(super_txt, (bar_x + 8, super_y + 1))
+                # Pulsing glow ring around super gauge
+                glow_cx = bar_x + s_bar_w // 2
+                glow_cy = super_y + s_bar_h // 2
+                glow_t = pygame.time.get_ticks() * 0.003
+                for ring in range(3):
+                    ring_radius = int(s_bar_w * 0.55 + ring * 5 + math.sin(glow_t + ring) * 3)
+                    ring_alpha = max(0, int(60 - ring * 18) - int(20 * math.sin(glow_t + ring)))
+                    glow_surf = pygame.Surface((ring_radius * 2 + 4, ring_radius * 2 + 4), pygame.SRCALPHA)
+                    pygame.draw.circle(glow_surf, (255, 200, 40, ring_alpha), (ring_radius + 2, ring_radius + 2), ring_radius, 2)
+                    surface.blit(glow_surf, (glow_cx - ring_radius - 2, glow_cy - ring_radius - 2))
             else:
                 pygame.draw.rect(surface, COLOR_BRASS, (bar_x - 3, super_y - 3, s_bar_w + 6, s_bar_h + 6), 1, border_radius=4)
                 s_fill_w = int(s_bar_w * s_pct)
@@ -178,7 +238,39 @@ class HUD:
                 surface.blit(b_text, (start_rx + 8, cur_y + 2))
                 cur_y += 22
 
-        # 7. Boss Health Bar (Bottom of Screen)
+        # 7. Combo Counter (Top-Center when combo >= 3)
+        if self.combo_count >= 3:
+            combo_str = f"x{self.combo_count} COMBO!"
+            combo_base_size = 22
+            combo_surf = pygame.font.SysFont("Helvetica, Arial, sans-serif", int(combo_base_size * self._combo_scale), bold=True).render(combo_str, True, (255, 230, 60))
+            combo_rect = combo_surf.get_rect(center=(SCREEN_WIDTH // 2, 95))
+            shadow_surf = pygame.font.SysFont("Helvetica, Arial, sans-serif", int(combo_base_size * self._combo_scale), bold=True).render(combo_str, True, (80, 40, 0))
+            shadow_rect = shadow_surf.get_rect(center=(SCREEN_WIDTH // 2 + 2, 97))
+            surface.blit(shadow_surf, shadow_rect)
+            surface.blit(combo_surf, combo_rect)
+
+        # 8. Damage Flash Vignette (red-edge screen overlay)
+        if self.damage_flash_timer > 0.0:
+            flash_alpha = int(180 * (self.damage_flash_timer / 0.4))
+            sw, sh = surface.get_size()
+            vignette = pygame.Surface((sw, sh), pygame.SRCALPHA)
+            edge = int(sh * 0.28)
+            for i in range(edge):
+                a = int(flash_alpha * (1.0 - i / edge) ** 2)
+                col = (200, 20, 20, a)
+                # top edge
+                pygame.draw.rect(vignette, col, (0, i, sw, 1))
+                # bottom edge
+                pygame.draw.rect(vignette, col, (0, sh - 1 - i, sw, 1))
+            edge_x = int(sw * 0.18)
+            for i in range(edge_x):
+                a = int(flash_alpha * (1.0 - i / edge_x) ** 2)
+                col = (200, 20, 20, a)
+                pygame.draw.rect(vignette, col, (i, 0, 1, sh))
+                pygame.draw.rect(vignette, col, (sw - 1 - i, 0, 1, sh))
+            surface.blit(vignette, (0, 0))
+
+        # 9. Boss Health Bar (Bottom of Screen)
         if boss and boss.is_alive():
             self._draw_boss_bar(surface, boss)
 
