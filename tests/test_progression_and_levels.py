@@ -101,13 +101,16 @@ def test_walkable_hub_station():
     assert hub.show_workshop is False
     print("  ✓ Workshop Anvil interaction verified.")
 
-    # Test Armory Rack interaction
+    # Test Armory Workbench interaction
     hub.player_pos = pygame.math.Vector2(hub.armory_rect.center)
-    orig_idx = hub.selected_weapon_idx
-    # Press E near armory cycles weapon
+    # Press E near armory opens weapon upgrade menu
     hub.handle_input([pygame.event.Event(pygame.KEYDOWN, key=pygame.K_e)])
-    assert hub.selected_weapon_idx == (orig_idx + 1) % len(hub.weapon_classes)
-    print(f"  ✓ Armory Rack weapon swap verified: {hub.active_weapon.name}")
+    assert hub.weapon_upgrade_menu.is_open is True
+    hub.weapon_upgrade_menu.close()
+    # Press 2 to cycle weapon
+    hub.handle_input([pygame.event.Event(pygame.KEYDOWN, key=pygame.K_2)])
+    assert hub.selected_weapon_idx == 1
+    print(f"  ✓ Armory Workbench interaction and weapon swap verified: {hub.active_weapon.name}")
 
     # Test Docking Bay Boarding & HUD Clearance (Zero Overlap with Terminal Gates)
     header_bar = pygame.Rect(20, 16, 340, 48)

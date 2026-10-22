@@ -20,6 +20,7 @@ class InputHandler:
         self.block_pressed = False
         self.interact_pressed = False
         self.pause_pressed = False
+        self.tab_pressed = False
         
         # Double-tap tracking: key -> last_press_timestamp
         self.last_key_press_time = {}
@@ -47,6 +48,7 @@ class InputHandler:
         self.block_pressed = False
         self.interact_pressed = False
         self.pause_pressed = False
+        self.tab_pressed = False
         self.num_keys_pressed.clear()
 
     def process_events(self, events: list[pygame.event.Event], camera=None):
@@ -85,6 +87,8 @@ class InputHandler:
                 # 4. Interact & Super Ability ('E' key)
                 elif event.key == pygame.K_e:
                     self.interact_pressed = True
+                elif event.key == pygame.K_TAB:
+                    self.tab_pressed = True
                 elif event.key in (pygame.K_ESCAPE, pygame.K_p):
                     self.pause_pressed = True
 
@@ -137,3 +141,21 @@ class InputHandler:
         self.move_dir = pygame.math.Vector2(dx, dy)
         if self.move_dir.length_squared() > 0:
             self.move_dir = self.move_dir.normalize()
+
+    def apply_mobile_inputs(self, mobile_controls):
+        """Merges virtual mobile controls into standard input state."""
+        if not mobile_controls or not mobile_controls.enabled:
+            return
+        m_vec = mobile_controls.get_move_vector()
+        if m_vec.length_squared() > 0:
+            self.move_dir = m_vec
+        if mobile_controls.is_fire_active():
+            self.attack_pressed = True
+            self.attack_held = True
+        if mobile_controls.is_dash_active():
+            self.dash_pressed = True
+        if mobile_controls.is_block_active():
+            self.block_pressed = True
+            self.block_held = True
+        if mobile_controls.is_interact_active():
+            self.interact_pressed = True

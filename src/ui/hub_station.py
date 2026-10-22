@@ -9,17 +9,21 @@ from src.config import (
     COLOR_WHITE, COLOR_CRIT_YELLOW, COLOR_EMBER_ORANGE, COLOR_STEEL_DARK,
     COLOR_STEEL_MID, COLOR_SHADOW
 )
-from src.combat.weapons import AVAILABLE_WEAPONS
+from src.combat.weapons import AVAILABLE_WEAPONS, create_weapon_by_id
 from src.level.car_generator import TRAIN_ROUTES
 from src.core.progression import ProgressionManager, PERK_DEFINITIONS
 from src.ui.sprite_renderer import draw_stoker_player
 from src.combat.enemy_codex import ENEMY_CODEX_DATA, DummyPreviewCamera, get_all_codex_entries
+from src.ui.weapon_upgrade_menu import WeaponUpgradeMenu
+from src.ui.dev_mode import SecretKeypad
+from src.ui.leaderboard_menu import LeaderboardMenu
 
 class HubStation:
     """Interactive, walkable Grand Central Terminal Hub with docking bays, workshop, armory, and enemy codex."""
-    def __init__(self, progression: ProgressionManager = None):
+    def __init__(self, progression: ProgressionManager = None, on_dev_unlock_callback=None):
         pygame.font.init()
         self.progression = progression or ProgressionManager()
+        self.on_dev_unlock_callback = on_dev_unlock_callback
         
         self.font_title = pygame.font.SysFont("Helvetica, Arial, sans-serif", 24, bold=True)
         self.font_header = pygame.font.SysFont("Helvetica, Arial, sans-serif", 18, bold=True)
@@ -38,7 +42,8 @@ class HubStation:
         # Weapons
         self.weapon_classes = AVAILABLE_WEAPONS
         self.selected_weapon_idx = 0
-        self.active_weapon = self.weapon_classes[self.selected_weapon_idx]()
+        eq_id = self.weapon_classes[self.selected_weapon_idx]().id
+        self.active_weapon = create_weapon_by_id(eq_id, self.progression.get_weapon_rank(eq_id))
 
         # Active departure selection
         self.selected_route_id = self.progression.get_active_route_id()
@@ -47,6 +52,10 @@ class HubStation:
         # Modals / Interacting
         self.show_workshop = False
         self.hovered_perk_id = None
+        self.weapon_upgrade_menu = WeaponUpgradeMenu(self.progression)
+        self.leaderboard_menu = LeaderboardMenu()
+        self.secret_keypad = SecretKeypad(on_unlock_callback=self._on_dev_mode_unlock)
+        self.dev_mode_unlocked = False
 
         # Docking Bays along north wall (5 gates)
         self.docking_bays = []
@@ -72,15 +81,11 @@ class HubStation:
         # Dispatch Archives / Field Bestiary Desk (Between Workshop and Concourse)
         self.codex_rect = pygame.Rect(345, SCREEN_HEIGHT // 2 - 20, 160, 120)
 
-        # Dispatch Test Console Terminal (Between Concourse and Armory)
-        self.test_terminal_rect = pygame.Rect(SCREEN_WIDTH - 505, SCREEN_HEIGHT // 2 - 20, 160, 120)
+        # Conductor Honor Roll Leaderboard Terminal Kiosk (Between Concourse and Armory)
+        self.leaderboard_rect = pygame.Rect(SCREEN_WIDTH - 505, SCREEN_HEIGHT // 2 - 20, 160, 120)
 
         # Armory Racks (Right Hall)
         self.armory_rect = pygame.Rect(SCREEN_WIDTH - 270, SCREEN_HEIGHT // 2 - 20, 160, 120)
-
-        # Top HUD Test Mode Button (safely above north docking gates)
-        self.hud_test_btn_rect = pygame.Rect(SCREEN_WIDTH // 2 - 95, 52, 190, 24)
-        self.request_test_mode = False
 
         # Enemy Threat Codex Modal State
         self.show_codex = False
@@ -93,6 +98,11 @@ class HubStation:
         # Input / Board buffer
         self.board_cooldown = 0.0
 
+    def _on_dev_mode_unlock(self):
+        self.dev_mode_unlocked = True
+        if self.on_dev_unlock_callback:
+            self.on_dev_unlock_callback()
+
     def reset_player(self):
         """Reset player position and state when returning to Grand Central Terminal Hub."""
         self.player_pos = pygame.math.Vector2(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 180)
@@ -100,18 +110,22 @@ class HubStation:
         self.facing_angle = -math.pi / 2
         self.show_workshop = False
         self.show_codex = False
-        self.request_test_mode = False
+        self.weapon_upgrade_menu.close()
+        self.leaderboard_menu.close()
         self.is_dashing = False
         self.dash_timer = 0.0
         self.board_cooldown = 0.4
         self.boarded = False
         self.selected_route_id = self.progression.get_active_route_id()
+        eq_id = self.progression.equipped_weapon_id
+        self.active_weapon = create_weapon_by_id(eq_id, self.progression.get_weapon_rank(eq_id))
 
     def get_selected_route_id(self) -> str:
         return self.selected_route_id
 
     def get_selected_weapon(self):
-        return self.weapon_classes[self.selected_weapon_idx]()
+        eq_id = self.progression.equipped_weapon_id
+        return create_weapon_by_id(eq_id, self.progression.get_weapon_rank(eq_id))
 
     def handle_input(self, events: list[pygame.event.Event]) -> bool:
         mouse_pos = pygame.mouse.get_pos()
@@ -120,6 +134,29 @@ class HubStation:
             self.facing_angle = math.atan2(to_mouse.y, to_mouse.x)
 
         for event in events:
+            # 1. Weapon Upgrade Modal has first priority
+            if self.weapon_upgrade_menu.is_open:
+                if self.weapon_upgrade_menu.handle_event(event):
+                    eq_id = self.progression.equipped_weapon_id
+                    for idx, wc in enumerate(self.weapon_classes):
+                        if wc().id == eq_id:
+                            self.selected_weapon_idx = idx
+                            break
+                    self.active_weapon = create_weapon_by_id(eq_id, self.progression.get_weapon_rank(eq_id))
+                    return False
+                return False
+
+            # 2. Leaderboard Modal
+            if self.leaderboard_menu.is_open:
+                if self.leaderboard_menu.handle_event(event):
+                    return False
+                return False
+
+            # 3. Secret Dev Mode Keypad
+            if self.secret_keypad.is_active:
+                if self.secret_keypad.handle_event(event):
+                    return False
+
             if event.type == pygame.KEYDOWN:
                 if self.show_workshop:
                     if event.key in (pygame.K_ESCAPE, pygame.K_e):
@@ -201,15 +238,14 @@ class HubStation:
                         self.show_codex = not self.show_codex
                         return False
 
-                    # Check near test console terminal desk
-                    if (self.player_pos - pygame.math.Vector2(self.test_terminal_rect.center)).length() < 130:
-                        self.request_test_mode = True
+                    # Check near Leaderboard kiosk desk
+                    if (self.player_pos - pygame.math.Vector2(self.leaderboard_rect.center)).length() < 130:
+                        self.leaderboard_menu.open()
                         return False
 
-                    # Check near armory
+                    # Check near armory (opens Weapon Upgrade & Equip Menu)
                     if (self.player_pos - pygame.math.Vector2(self.armory_rect.center)).length() < 130:
-                        self.selected_weapon_idx = (self.selected_weapon_idx + 1) % len(self.weapon_classes)
-                        self._set_weapon(self.selected_weapon_idx)
+                        self.weapon_upgrade_menu.open()
                         return False
 
                     # Check near any Docking Bay gate
@@ -267,9 +303,9 @@ class HubStation:
                         self.show_codex = True
                         return False
 
-                    # Click on test console terminal desk or top HUD pill button
-                    if self.test_terminal_rect.collidepoint(event.pos) or self.hud_test_btn_rect.collidepoint(event.pos):
-                        self.request_test_mode = True
+                    # Click on Conductor Honor Roll Leaderboard Kiosk
+                    if self.leaderboard_rect.collidepoint(event.pos):
+                        self.leaderboard_menu.open()
                         return False
 
                     # Click on workshop anvil
@@ -277,10 +313,9 @@ class HubStation:
                         self.show_workshop = True
                         return False
 
-                    # Click on armory rack
+                    # Click on armory rack (opens Weapon Upgrade & Equip Menu)
                     if self.armory_rect.collidepoint(event.pos):
-                        self.selected_weapon_idx = (self.selected_weapon_idx + 1) % len(self.weapon_classes)
-                        self._set_weapon(self.selected_weapon_idx)
+                        self.weapon_upgrade_menu.open()
                         return False
 
                     # Click on gate to board (only single active track is boardable)
@@ -304,7 +339,7 @@ class HubStation:
         self.update(0.016)
 
         # Auto-board if walking directly into gate threshold (only single active track)
-        if not self.show_workshop and not self.show_codex and self.board_cooldown <= 0.0:
+        if not self.show_workshop and not self.show_codex and not self.weapon_upgrade_menu.is_open and not self.leaderboard_menu.is_open and self.board_cooldown <= 0.0:
             for bay in self.docking_bays:
                 if bay["door_rect"].collidepoint(self.player_pos.x, self.player_pos.y):
                     if self.progression.get_track_state(bay["route_id"]) == "active":
@@ -318,7 +353,10 @@ class HubStation:
         if self.board_cooldown > 0.0:
             self.board_cooldown = max(0.0, self.board_cooldown - dt)
 
-        if not self.show_workshop and not self.show_codex:
+        # Update Secret Keypad presence based on player position in Hub
+        self.secret_keypad.update(self.player_pos, dt)
+
+        if not self.show_workshop and not self.show_codex and not self.weapon_upgrade_menu.is_open and not self.leaderboard_menu.is_open:
             keys = pygame.key.get_pressed()
             move = pygame.math.Vector2(0, 0)
             if keys[pygame.K_w] or keys[pygame.K_UP]:
@@ -343,7 +381,9 @@ class HubStation:
 
     def _set_weapon(self, idx: int):
         self.selected_weapon_idx = idx
-        self.active_weapon = self.weapon_classes[idx]()
+        wpn_id = self.weapon_classes[idx]().id
+        self.progression.equipped_weapon_id = wpn_id
+        self.active_weapon = create_weapon_by_id(wpn_id, self.progression.get_weapon_rank(wpn_id))
 
     def _try_buy_perk_by_idx(self, idx: int):
         perk_keys = list(PERK_DEFINITIONS.keys())
@@ -489,28 +529,29 @@ class HubStation:
         arch_prompt = self.font_prompt.render("[PRESS E / B / CLICK]", True, COLOR_CRIT_YELLOW if near_arch else (160, 160, 160))
         surface.blit(arch_prompt, arch_prompt.get_rect(center=(arch.centerx, arch.top + 80)))
 
-        # 4c. Dispatch Test Console Terminal (Between Concourse and Armory)
-        term = self.test_terminal_rect
-        near_term = (self.player_pos - pygame.math.Vector2(term.center)).length() < 130
-        pygame.draw.rect(surface, (22, 28, 36), term, border_radius=10)
-        pygame.draw.rect(surface, COLOR_BRASS_HIGHLIGHT if near_term else (60, 100, 140), term, 3 if near_term else 2, border_radius=10)
-        term_title = self.font_body.render("TEST CONSOLE", True, COLOR_BRASS_HIGHLIGHT)
-        surface.blit(term_title, term_title.get_rect(center=(term.centerx, term.top + 22)))
-        term_sub = self.font_tag.render("STAGES & CHEATS", True, (130, 220, 255))
-        surface.blit(term_sub, term_sub.get_rect(center=(term.centerx, term.top + 45)))
-        term_prompt = self.font_prompt.render("[PRESS F1 / E / CLICK]", True, COLOR_CRIT_YELLOW if near_term else (160, 160, 160))
-        surface.blit(term_prompt, term_prompt.get_rect(center=(term.centerx, term.top + 80)))
+        # 4c. Conductor Honor Roll Leaderboard Kiosk (Between Concourse and Armory)
+        board = self.leaderboard_rect
+        near_board = (self.player_pos - pygame.math.Vector2(board.center)).length() < 130
+        pygame.draw.rect(surface, (22, 28, 36), board, border_radius=10)
+        pygame.draw.rect(surface, COLOR_BRASS_HIGHLIGHT if near_board else (60, 100, 140), board, 3 if near_board else 2, border_radius=10)
+        board_title = self.font_body.render("CONDUCTOR BOARD", True, COLOR_BRASS_HIGHLIGHT)
+        surface.blit(board_title, board_title.get_rect(center=(board.centerx, board.top + 22)))
+        board_sub = self.font_tag.render("HONOR ROLL & RANKS", True, (130, 220, 255))
+        surface.blit(board_sub, board_sub.get_rect(center=(board.centerx, board.top + 45)))
+        board_prompt = self.font_prompt.render("[PRESS E / CLICK]", True, COLOR_CRIT_YELLOW if near_board else (160, 160, 160))
+        surface.blit(board_prompt, board_prompt.get_rect(center=(board.centerx, board.top + 80)))
 
         # 5. Armory Racks (Right Hall)
         ar = self.armory_rect
         near_ar = (self.player_pos - pygame.math.Vector2(ar.center)).length() < 130
         pygame.draw.rect(surface, (24, 28, 38), ar, border_radius=10)
         pygame.draw.rect(surface, COLOR_BRASS_HIGHLIGHT if near_ar else COLOR_BRASS, ar, 3 if near_ar else 2, border_radius=10)
-        ar_title = self.font_body.render("ARMORY RACK", True, COLOR_BRASS_HIGHLIGHT)
+        ar_title = self.font_body.render("ARMORY WORKBENCH", True, COLOR_BRASS_HIGHLIGHT)
         surface.blit(ar_title, ar_title.get_rect(center=(ar.centerx, ar.top + 22)))
-        wpn_text = self.font_tag.render(self.active_weapon.name.upper(), True, COLOR_WHITE)
+        cur_rank = self.progression.get_weapon_rank(self.active_weapon.id)
+        wpn_text = self.font_tag.render(f"{self.active_weapon.name.upper()} [RANK {cur_rank}]", True, COLOR_WHITE)
         surface.blit(wpn_text, wpn_text.get_rect(center=(ar.centerx, ar.top + 45)))
-        ar_prompt = self.font_prompt.render("[PRESS E TO SWAP]", True, COLOR_CRIT_YELLOW if near_ar else (160, 160, 160))
+        ar_prompt = self.font_prompt.render("[PRESS E TO UPGRADE]", True, COLOR_CRIT_YELLOW if near_ar else (160, 160, 160))
         surface.blit(ar_prompt, ar_prompt.get_rect(center=(ar.centerx, ar.top + 80)))
 
         # 6. Draw Player Stoker
@@ -560,20 +601,14 @@ class HubStation:
         surface.blit(title_surf, title_surf.get_rect(center=(SCREEN_WIDTH // 2, 16)))
         surface.blit(sub_surf, sub_surf.get_rect(center=(SCREEN_WIDTH // 2, 34)))
 
-        # Top HUD Test Mode Button
-        mouse_pos = pygame.mouse.get_pos()
-        hover_test_btn = self.hud_test_btn_rect.collidepoint(mouse_pos)
-        pygame.draw.rect(surface, (30, 48, 65) if hover_test_btn else (20, 28, 38), self.hud_test_btn_rect, border_radius=13)
-        pygame.draw.rect(surface, COLOR_BRASS_HIGHLIGHT if hover_test_btn else (70, 120, 160), self.hud_test_btn_rect, 1, border_radius=13)
-        t_btn_surf = self.font_tag.render("⚡ [F1] TEST & DEV CONSOLE", True, COLOR_WHITE if hover_test_btn else (180, 220, 255))
-        surface.blit(t_btn_surf, t_btn_surf.get_rect(center=self.hud_test_btn_rect.center))
-
-        # Scrap Metal Counter (Top Right)
-        scrap_bar = pygame.Rect(SCREEN_WIDTH - 220, 16, 200, 48)
-        pygame.draw.rect(surface, (18, 22, 30), scrap_bar, border_radius=8)
-        pygame.draw.rect(surface, COLOR_BRASS, scrap_bar, 1, border_radius=8)
-        sc_lbl = self.font_header.render(f"SCRAP: {self.progression.scrap}", True, (255, 210, 80))
-        surface.blit(sc_lbl, (scrap_bar.left + 16, scrap_bar.top + 14))
+        # Scrap Metal & Weapon Token Counters (Top Right)
+        res_bar = pygame.Rect(SCREEN_WIDTH - 290, 16, 270, 48)
+        pygame.draw.rect(surface, (18, 22, 30), res_bar, border_radius=8)
+        pygame.draw.rect(surface, COLOR_BRASS, res_bar, 1, border_radius=8)
+        sc_lbl = self.font_tag.render(f"SCRAP: {self.progression.scrap}", True, (255, 210, 80))
+        tok_lbl = self.font_tag.render(f"TOKENS: {self.progression.weapon_tokens} ✦", True, (100, 240, 170))
+        surface.blit(sc_lbl, (res_bar.left + 14, res_bar.top + 14))
+        surface.blit(tok_lbl, (res_bar.left + 140, res_bar.top + 14))
 
         # Chud Studios Production Plaque (Art Deco Brass Inlay)
         plaque_rect = pygame.Rect(SCREEN_WIDTH // 2 - 140, SCREEN_HEIGHT - 52, 280, 20)
@@ -583,7 +618,7 @@ class HubStation:
         surface.blit(plaque_txt, plaque_txt.get_rect(center=plaque_rect.center))
 
         # Bottom Controls Hint
-        ctrl_str = "[WASD] Move Stoker | [MOUSE] Aim | [F1] Test Console | [E AT ARCHIVES / B] Codex | [E AT ANVIL] Workshop | [STEP IN GATE] Depart"
+        ctrl_str = "[WASD] Move Stoker | [MOUSE] Aim | [E AT ARMORY] Weapon Upgrades | [E AT LEADERBOARD] Honor Board | [E AT ANVIL] Workshop | [STEP IN GATE] Depart"
         ctrl_surf = self.font_body.render(ctrl_str, True, (160, 175, 195))
         surface.blit(ctrl_surf, ctrl_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 18)))
 
@@ -594,6 +629,17 @@ class HubStation:
         # 9. Render Enemy Codex Modal if open
         if self.show_codex:
             self._draw_enemy_codex_modal(surface)
+
+        # 10. Render Conductor Honor Roll Leaderboard if open
+        if self.leaderboard_menu.is_open:
+            self.leaderboard_menu.draw(surface)
+
+        # 11. Render Weapon Upgrade & Equip Menu if open
+        if self.weapon_upgrade_menu.is_open:
+            self.weapon_upgrade_menu.draw(surface)
+
+        # 12. Render Secret Developer Keypad (draws when stoker approaches bottom-right)
+        self.secret_keypad.draw(surface)
 
     def _get_filtered_codex_entries(self):
         all_entries = get_all_codex_entries()

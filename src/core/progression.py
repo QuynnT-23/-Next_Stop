@@ -54,6 +54,73 @@ PERK_DEFINITIONS = {
 
 ALL_STAGES = ["steam", "derelict", "subway", "cryo", "infernal"]
 
+WEAPON_ID_ALIASES = {
+    "riveter": "rivet_gun",
+    "rivet_gun": "rivet_gun",
+    "cleaver": "stoker_wrench",
+    "wrench": "stoker_wrench",
+    "stoker_wrench": "stoker_wrench",
+    "scattergun": "coal_scattergun",
+    "coal_scattergun": "coal_scattergun",
+    "arc_caster": "tesla_arc_caster",
+    "tesla_arc_caster": "tesla_arc_caster",
+}
+
+WEAPON_UPGRADE_DEFINITIONS = {
+    "rivet_gun": {
+        "id": "rivet_gun",
+        "name": "Pneumatic Riveter",
+        "class_name": "RivetGun",
+        "icon": "🔫",
+        "ranks": {
+            1: {"title": "Standard Issue", "desc": "Baseline pneumatic nail driver with pinpoint accuracy.", "bonus": "Standard stats"},
+            2: {"title": "High-Velocity Stream", "desc": "+30% projectile velocity and +25% attack speed.", "bonus": "+30% Vel, +25% Atk Spd"},
+            3: {"title": "Armor Piercer", "desc": "Rivets pierce through 2 additional enemies or windows with +20% damage.", "bonus": "+2 Pierce, +20% Dmg"},
+            4: {"title": "Twin Micro-Rockets", "desc": "Fires dual parallel needles that detonate micro-shrapnel on impact.", "bonus": "Twin Needles + Micro-Blast"},
+            5: {"title": "Tungsten Railgun", "desc": "Rivets bounce 3x off train bulkheads with +50% critical damage per bounce.", "bonus": "3x Wall Ricochet + Blazing Tracers"}
+        }
+    },
+    "stoker_wrench": {
+        "id": "stoker_wrench",
+        "name": "Stoker's Heavy Cleaver",
+        "class_name": "StokerWrench",
+        "icon": "🗡️",
+        "ranks": {
+            1: {"title": "Standard Cleaver", "desc": "Heavy melee blade capable of repelling enemy strikes.", "bonus": "Standard melee arc"},
+            2: {"title": "Broadhead Edge", "desc": "+35% cleave arc width and +25% base melee damage.", "bonus": "+35% Arc, +25% Dmg"},
+            3: {"title": "Sonic Crescent Wave", "desc": "Each swing launches a razor-steam shockwave that travels forward across the car.", "bonus": "Flying Steam Blade Wave"},
+            4: {"title": "Kinetic Reversal", "desc": "Parried projectiles transform into homing critical missiles dealing 3x damage.", "bonus": "Homing 3x Deflection"},
+            5: {"title": "Berserker Cyclone", "desc": "Every 3rd attack performs a 360° double whirlwind that vacuums in enemies with 1.2s invulnerability.", "bonus": "360° Vacuum Whirlwind"}
+        }
+    },
+    "coal_scattergun": {
+        "id": "coal_scattergun",
+        "name": "Coal Scattergun",
+        "class_name": "CoalScattergun",
+        "icon": "💥",
+        "ranks": {
+            1: {"title": "Standard Blunderbuss", "desc": "5-pellet spread dealing high point-blank burst.", "bonus": "5 Pellets"},
+            2: {"title": "Choke Bore Heavy", "desc": "Fires 8 pellets (was 5) with a tightened focus cone.", "bonus": "8 Pellets, Tight Spread"},
+            3: {"title": "Dragon's Breath", "desc": "Pellets ignite enemies with burning embers and spawn burning floor puddles.", "bonus": "Incendiary DoT & Fire Puddles"},
+            4: {"title": "Concussion Shrapnel", "desc": "Massive kinetic force staggers targets, knocking them back and stunning for 0.6s.", "bonus": "Heavy Knockback & Stun"},
+            5: {"title": "Breacher Artillery Slug", "desc": "Center pellet is replaced by a massive superheated explosive slug detonating on impact.", "bonus": "Central Explosive Slug"}
+        }
+    },
+    "tesla_arc_caster": {
+        "id": "tesla_arc_caster",
+        "name": "Tesla Arc Caster",
+        "icon": "⚡",
+        "class_name": "TeslaArcCaster",
+        "ranks": {
+            1: {"title": "Standard Arc Caster", "desc": "Electric plasma spheres that pierce foes and chain lightning.", "bonus": "Standard arc chaining"},
+            2: {"title": "High-Voltage Coil", "desc": "+2 arc lightning jumps and +30% ball velocity.", "bonus": "+2 Chain Jumps, +30% Vel"},
+            3: {"title": "Static Ionization", "desc": "Electrified targets take +30% vulnerability damage from all attacks.", "bonus": "+30% Damage Vulnerability"},
+            4: {"title": "Dual Helix Orbs", "desc": "Fires twin counter-spiraling plasma spheres covering wide hallways.", "bonus": "Twin Spiraling Orbs"},
+            5: {"title": "Storm Nexus Web", "desc": "Orbs leave behind an electric Storm Nexus that tethers and fries all nearby foes in a lightning cage.", "bonus": "Persistent Lightning Cage Nexus"}
+        }
+    }
+}
+
 SUPER_ABILITIES = {
     "super_boiler_overdrive": {
         "id": "super_boiler_overdrive",
@@ -90,7 +157,35 @@ class ProgressionManager:
         self.total_bosses_slain = 0
         self.equipped_super = None
         self.encountered_enemies = ["ticket_inspector", "ranged_steward", "boiler_imp"]
+        self.weapon_tokens = 0
+        self.weapon_ranks = {"rivet_gun": 1, "stoker_wrench": 1, "coal_scattergun": 1, "tesla_arc_caster": 1}
+        self.equipped_weapon_id = "rivet_gun"
         self.load()
+
+    def get_weapon_rank(self, weapon_id: str) -> int:
+        """Returns the current upgrade rank (1 to 5) for a weapon."""
+        canonical_id = WEAPON_ID_ALIASES.get(weapon_id, weapon_id)
+        return self.weapon_ranks.get(canonical_id, 1)
+
+    def can_upgrade_weapon(self, weapon_id: str) -> bool:
+        """Checks if a weapon can be upgraded (costs 1 token, max rank 5)."""
+        canonical_id = WEAPON_ID_ALIASES.get(weapon_id, weapon_id)
+        return self.weapon_tokens >= 1 and self.get_weapon_rank(canonical_id) < 5
+
+    def upgrade_weapon(self, weapon_id: str) -> bool:
+        """Spends 1 Weapon Token to advance weapon to the next rank."""
+        canonical_id = WEAPON_ID_ALIASES.get(weapon_id, weapon_id)
+        if self.can_upgrade_weapon(canonical_id):
+            self.weapon_tokens -= 1
+            self.weapon_ranks[canonical_id] = self.get_weapon_rank(canonical_id) + 1
+            self.save()
+            return True
+        return False
+
+    def add_weapon_tokens(self, count: int = 1):
+        """Adds or modifies weapon tokens."""
+        self.weapon_tokens = max(0, self.weapon_tokens + count)
+        self.save()
 
     def record_enemy_encounter(self, enemy_id: str) -> bool:
         """Records an enemy encounter in Conductor's Field Log. Returns True if newly recorded."""
@@ -154,6 +249,8 @@ class ProgressionManager:
             new_loop = True
 
         self.unlocked_stages = [self.get_active_route_id()]
+        # Award 1 rare Weapon Upgrade Token on full level/track clear
+        self.weapon_tokens += 1
         self.save()
         return {
             "previous_track_idx": prev_idx,
@@ -302,6 +399,9 @@ class ProgressionManager:
         self.total_bosses_slain = 0
         self.equipped_super = None
         self.encountered_enemies = []
+        self.weapon_tokens = 0
+        self.weapon_ranks = {"rivet_gun": 1, "stoker_wrench": 1, "coal_scattergun": 1, "tesla_arc_caster": 1}
+        self.equipped_weapon_id = "rivet_gun"
         self.save()
 
     def save(self):
@@ -316,7 +416,10 @@ class ProgressionManager:
             "total_runs": self.total_runs,
             "total_bosses_slain": self.total_bosses_slain,
             "equipped_super": self.equipped_super,
-            "encountered_enemies": self.encountered_enemies
+            "encountered_enemies": self.encountered_enemies,
+            "weapon_tokens": self.weapon_tokens,
+            "weapon_ranks": self.weapon_ranks,
+            "equipped_weapon_id": self.equipped_weapon_id
         }
         try:
             with open(self.save_path, 'w', encoding='utf-8') as f:
@@ -343,5 +446,8 @@ class ProgressionManager:
             self.total_bosses_slain = data.get("total_bosses_slain", 0)
             self.equipped_super = data.get("equipped_super", None)
             self.encountered_enemies = data.get("encountered_enemies", ["ticket_inspector", "ranged_steward", "boiler_imp"])
+            self.weapon_tokens = data.get("weapon_tokens", 0)
+            self.weapon_ranks = data.get("weapon_ranks", {"rivet_gun": 1, "stoker_wrench": 1, "coal_scattergun": 1, "tesla_arc_caster": 1})
+            self.equipped_weapon_id = data.get("equipped_weapon_id", "rivet_gun")
         except Exception as e:
             print(f"Warning: Failed to load progression: {e}")

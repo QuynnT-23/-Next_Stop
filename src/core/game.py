@@ -19,7 +19,10 @@ from src.level.car_generator import RunManager
 from src.combat.boons import get_random_boon_choices
 from src.core.progression import ProgressionManager
 from src.combat.enemy_codex import get_codex_id_from_enemy
-from src.ui.test_mode_menu import TestModeMenu
+from src.ui.dev_mode import LevelIteratorDrawer
+from src.core.leaderboard import LeaderboardClient
+from src.ui.mobile_controls import MobileControls
+from src.combat.weapons import create_weapon_by_id
 
 class Game:
     """Central engine managing all subsystems, game states, and loop execution."""
@@ -53,8 +56,10 @@ class Game:
         self.hud = HUD()
         self.upgrade_menu = UpgradeMenu()
         self.progression = progression or ProgressionManager()
-        self.hub_station = HubStation(self.progression)
+        self.hub_station = HubStation(self.progression, on_dev_unlock_callback=self.unlock_dev_mode)
         self.splash_screen = SplashScreen(self.audio)
+        self.leaderboard_client = LeaderboardClient()
+        self.mobile_controls = MobileControls()
 
         # Gameplay entities & progression
         self.player = None
@@ -66,9 +71,9 @@ class Game:
         self.train_car = None
         self.run_manager = None
 
-        # In-Game Test Mode & Dev Console
-        self.test_mode_active = False
-        self.test_mode_menu = TestModeMenu(self)
+        # Developer Mode & Level Iterator Drawer (unlocked only via secret code CHUDDEV)
+        self.dev_mode = False
+        self.dev_drawer = LevelIteratorDrawer(self)
         
         # Fonts for overlays
         pygame.font.init()
@@ -97,11 +102,16 @@ class Game:
         self.audio.play('shoot')
         pygame.event.clear()
 
+    def unlock_dev_mode(self):
+        """Called by HubStation secret keypad when CHUDDEV is entered."""
+        self.dev_mode = True
+        self.dev_drawer.open()
+        self.audio.play('boon')
+
     def toggle_test_mode(self):
-        """Toggle the in-game Test Mode & Dev Console overlay."""
-        self.test_mode_active = not self.test_mode_active
-        if self.test_mode_active:
-            self.test_mode_menu.open()
+        """Toggles the Level Iterator Drawer if Dev Mode is unlocked."""
+        if self.dev_mode:
+            self.dev_drawer.toggle()
             self.audio.play('shoot')
 
     def deploy_to_stage_and_car(self, route_id: str, car_index: int, starter_weapon, loop_count: int = 0):
@@ -124,7 +134,9 @@ class Game:
         # Position player
         start_y = (self.train_car.top_wall_y + self.train_car.bottom_wall_y) // 2
         self.player = Player(120, start_y)
-        self.player.equip_weapon(starter_weapon)
+        if starter_weapon is not None:
+            w_rank = self.progression.get_weapon_rank(starter_weapon.id)
+            self.player.equip_weapon(create_weapon_by_id(starter_weapon.id, w_rank))
         equipped_super = self.progression.get_equipped_super()
         if equipped_super:
             self.player.equipped_super_id = equipped_super["id"]
@@ -202,7 +214,9 @@ class Game:
         # Setup player at left entrance of caboose
         start_y = (self.train_car.top_wall_y + self.train_car.bottom_wall_y) // 2
         self.player = Player(120, start_y)
-        self.player.equip_weapon(starter_weapon)
+        if starter_weapon is not None:
+            w_rank = self.progression.get_weapon_rank(starter_weapon.id)
+            self.player.equip_weapon(create_weapon_by_id(starter_weapon.id, w_rank))
         equipped_super = self.progression.get_equipped_super()
         if equipped_super:
             self.player.equipped_super_id = equipped_super["id"]
@@ -267,16 +281,30 @@ class Game:
                 self.running = False
                 return False
 
-        # Global toggle for Test & Dev Console (F1 or backquote / tilde)
+        # Virtual mobile controls event processing
         for event in events:
-            if event.type == pygame.KEYDOWN and event.key in (pygame.K_F1, pygame.K_BACKQUOTE):
-                self.toggle_test_mode()
-                return True
+            if self.mobile_controls.handle_event(event):
+                break
 
-        # If test mode modal is active, delegate all input to it
-        if self.test_mode_active:
-            self.test_mode_menu.handle_input(events)
-            return True
+        # Developer Mode Keybindings (Only active when unlocked with secret code CHUDDEV)
+        if self.dev_mode:
+            for event in events:
+                if event.type == pygame.KEYDOWN:
+                    if event.key in (pygame.K_BACKQUOTE, pygame.K_F1):
+                        self.dev_drawer.toggle()
+                        self.audio.play('shoot')
+                        return True
+                    elif event.key == pygame.K_n and self.state == self.STATE_PLAYING:
+                        self.dev_drawer.next_car()
+                        return True
+                    elif event.key == pygame.K_b and self.state == self.STATE_PLAYING:
+                        self.dev_drawer.prev_car()
+                        return True
+
+            if self.dev_drawer.is_open:
+                for e in events:
+                    if self.dev_drawer.handle_event(e):
+                        return True
 
         if self.state == self.STATE_SPLASH:
             if self.splash_screen.handle_input(events):
@@ -286,10 +314,6 @@ class Game:
 
         elif self.state == self.STATE_HUB:
             boarded = self.hub_station.handle_input(events)
-            if self.hub_station.request_test_mode:
-                self.hub_station.request_test_mode = False
-                self.toggle_test_mode()
-                return True
             if boarded:
                 route = self.hub_station.get_selected_route_id()
                 weapon = self.hub_station.get_selected_weapon()
@@ -328,10 +352,13 @@ class Game:
         # Cap max dt to avoid physics spiral on lag spike
         dt = min(dt, 0.05)
 
-        # Pause physics while Test Console is open
-        if self.test_mode_active:
-            self.test_mode_menu.update(dt)
+        # Pause physics while Dev Drawer is open
+        if self.dev_mode and self.dev_drawer.is_open:
+            self.dev_drawer.update(dt)
             return
+
+        # Feed mobile controls into input handler
+        self.input_handler.apply_mobile_inputs(self.mobile_controls)
 
         if self.state == self.STATE_SPLASH:
             if self.splash_screen.update(dt):
@@ -349,6 +376,24 @@ class Game:
                 self.state = self.STATE_GAME_OVER
                 self.overlay_input_delay = 0.5
                 self.audio.play('explosion')
+                # Record run in conductor honor board
+                wpn_rank = self.progression.get_weapon_rank(self.player.weapon.id) if self.player and self.player.weapon else 1
+                wpn_name = f"{self.player.weapon.name} (R{wpn_rank})" if self.player and self.player.weapon else "Riveter"
+                rt_id = self.run_manager.route_id if self.run_manager else "steam"
+                rt_name = self.run_manager.route_data.get('name', 'Track') if self.run_manager else "Track"
+                cars_cleared = self.run_manager.current_car_index if self.run_manager else 0
+                self.leaderboard_client.record_run(
+                    player_name=f"Stoker Lvl {self.progression.level}",
+                    route_id=rt_id,
+                    route_name=rt_name,
+                    cars_cleared=cars_cleared,
+                    weapon_name=wpn_name,
+                    loop_count=self.progression.loop_count,
+                    is_victory=False,
+                    enemies_killed=self.enemies_killed,
+                    damage_dealt=self.damage_dealt,
+                    duration_sec=self.run_duration_sec
+                )
                 return
 
             # Update hazards & props
@@ -388,6 +433,23 @@ class Game:
                         self.earned_scrap += 50
                         self.progression.total_bosses_slain += 1
                         self.newly_unlocked_stage = self.progression.advance_track_on_victory()
+                        # Record victorious run in conductor honor board
+                        wpn_rank = self.progression.get_weapon_rank(self.player.weapon.id) if self.player and self.player.weapon else 1
+                        wpn_name = f"{self.player.weapon.name} (R{wpn_rank})" if self.player and self.player.weapon else "Riveter"
+                        rt_id = self.run_manager.route_id if self.run_manager else "steam"
+                        rt_name = self.run_manager.route_data.get('name', 'Track') if self.run_manager else "Track"
+                        self.leaderboard_client.record_run(
+                            player_name=f"Stoker Lvl {self.progression.level}",
+                            route_id=rt_id,
+                            route_name=rt_name,
+                            cars_cleared=15,
+                            weapon_name=wpn_name,
+                            loop_count=self.progression.loop_count,
+                            is_victory=True,
+                            enemies_killed=self.enemies_killed,
+                            damage_dealt=self.damage_dealt,
+                            duration_sec=self.run_duration_sec
+                        )
                     else:
                         self.victory_transition_timer -= dt
                         if self.victory_transition_timer <= 0:
@@ -495,6 +557,9 @@ class Game:
             if self.overlay_input_delay > 0.0:
                 self.overlay_input_delay = max(0.0, self.overlay_input_delay - dt)
 
+        # Clear one-frame mobile impulse states
+        self.mobile_controls.post_update_clear()
+
     def render(self):
         """Draw everything based on current state."""
         self.screen.fill(COLOR_BG)
@@ -555,9 +620,13 @@ class Game:
             elif self.state == self.STATE_VICTORY:
                 self._draw_victory_overlay()
 
-        # In-Game Test Mode & Dev Console Overlay (rendered above Hub or active Car)
-        if self.test_mode_active:
-            self.test_mode_menu.draw(self.screen)
+        # On-Screen Mobile Virtual Controls (Toggleable via [M] or touch)
+        if self.state in (self.STATE_HUB, self.STATE_PLAYING, self.STATE_BOON_DRAFT):
+            self.mobile_controls.draw(self.screen)
+
+        # Developer Level Iterator Drawer Overlay (if unlocked and open)
+        if self.dev_mode and self.dev_drawer.is_open:
+            self.dev_drawer.draw(self.screen)
 
         if not self.headless:
             pygame.display.flip()

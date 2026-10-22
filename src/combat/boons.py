@@ -17,13 +17,14 @@ RARITY_COLORS = {
 
 class Boon:
     """Base class for ability upgrades supporting 3-tier leveling and evolutions."""
-    def __init__(self, boon_id: str, name: str, rarity: str, tag: str, description: str, color: tuple):
+    def __init__(self, boon_id: str, name: str, rarity: str, tag: str, description: str, color: tuple, element: str = "KINETIC"):
         self.id = boon_id
         self.name = name
         self.rarity = rarity          # Common, Rare, Epic, Legendary
         self.tag = tag                # Tesla, Steam, Kinetic, Alchemical, Cryo, Pyro
         self.description = description
         self.color = color if color else RARITY_COLORS.get(rarity, COLOR_WHITE)
+        self.element = element        # ELECTRIC, PYRO, CRYO, KINETIC, ALCHEMICAL, DEFENSIVE, MOBILITY
         self.level = 1
         self.max_level = 3
 
@@ -38,6 +39,13 @@ class Boon:
     def get_upgrade_description(self) -> str:
         """Returns preview text for next level tier."""
         return "Increases power and effectiveness."
+
+    def get_stat_breakdown(self) -> list[tuple[str, str]]:
+        """Returns structured stat metrics [(label, value)] for detailed UI inspector."""
+        return [
+            ("Tier Level", f"Tier {self.level}/{self.max_level}"),
+            ("Effect Scaling", f"+{self.level * 25}% Base Power")
+        ]
 
     def upgrade(self, player):
         """Advance to next level tier."""
@@ -77,10 +85,18 @@ class TeslaCoilBoon(Boon):
         super().__init__(
             "tesla_coil", "Tesla Discharge", rarity, "Tesla",
             "Attacks shock the target and chain lightning arcs to 2 nearby foes for 45% damage.",
-            RARITY_COLORS["Epic"]
+            RARITY_COLORS["Epic"],
+            element="ELECTRIC"
         )
         self.chain_count = 2
         self.damage_mult = 0.45
+
+    def get_stat_breakdown(self) -> list[tuple[str, str]]:
+        if self.level == 1:
+            return [("Chain Targets", "2 foes (-> 4 next)"), ("Arc Damage", "45% (-> 65% next)"), ("Shock Effect", "Stun (at Lvl 2)")]
+        elif self.level == 2:
+            return [("Chain Targets", "4 foes (-> 6 next)"), ("Arc Damage", "65% (-> 85% next)"), ("Shock Effect", "Stun + Fatal Detonation")]
+        return [("Chain Targets", "6 foes (MAX)"), ("Arc Damage", "85% (MAX)"), ("Shock Effect", "Stun + Exploding Foes")]
 
     def get_upgrade_description(self) -> str:
         if self.level == 1:
@@ -136,9 +152,17 @@ class SteamOverdriveDashBoon(Boon):
         super().__init__(
             "steam_dash", "Boiler Jet Dash", rarity, "Steam",
             "Dashing vents burning steam, dealing 25 damage to enemies caught in your wake.",
-            COLOR_EMBER_ORANGE
+            COLOR_EMBER_ORANGE,
+            element="PYRO"
         )
         self.burn_damage = 25
+
+    def get_stat_breakdown(self) -> list[tuple[str, str]]:
+        if self.level == 1:
+            return [("Trail Burn", "25 DMG (-> 45 next)"), ("Trail Width", "45px (-> 70px next)"), ("Bonus Dash", "+1 at Tier 3")]
+        elif self.level == 2:
+            return [("Trail Burn", "45 DMG (-> 70 next)"), ("Trail Width", "70px (MAX)"), ("Bonus Dash", "+1 at Tier 3")]
+        return [("Trail Burn", "70 DMG (MAX)"), ("Trail Width", "70px (MAX)"), ("Backblast", "30 AoE DMG + 1 Dash")]
 
     def get_upgrade_description(self) -> str:
         if self.level == 1:
@@ -204,10 +228,18 @@ class TungstenPiercingBoon(Boon):
         super().__init__(
             "tungsten_pierce", "Tungsten Rounds", rarity, "Kinetic",
             "Projectiles pierce +1 target and gain +20% velocity.",
-            COLOR_BRASS_HIGHLIGHT
+            COLOR_BRASS_HIGHLIGHT,
+            element="KINETIC"
         )
         self.extra_pierce = 1
         self.vel_mult = 1.20
+
+    def get_stat_breakdown(self) -> list[tuple[str, str]]:
+        if self.level == 1:
+            return [("Pierce Count", "+1 (-> +2 next)"), ("Proj Velocity", "+20% (-> +35% next)"), ("Wall Ricochet", "Locked")]
+        elif self.level == 2:
+            return [("Pierce Count", "+2 (-> +3 next)"), ("Proj Velocity", "+35% (-> +50% next)"), ("Wall Ricochet", "Locked")]
+        return [("Pierce Count", "+3 (MAX)"), ("Proj Velocity", "+50% (MAX)"), ("Wall Ricochet", "Active (Bounces)")]
 
     def get_upgrade_description(self) -> str:
         if self.level == 1:
@@ -235,10 +267,18 @@ class KineticPlatingBoon(Boon):
         super().__init__(
             "kinetic_plating", "Kinetic Repulsor", rarity, "Kinetic",
             "When struck, blasts surrounding foes backward and deals 20 damage.",
-            (180, 200, 220)
+            (180, 200, 220),
+            element="DEFENSIVE"
         )
         self.blast_dmg = 20
         self.blast_radius = 180.0
+
+    def get_stat_breakdown(self) -> list[tuple[str, str]]:
+        if self.level == 1:
+            return [("Blast Damage", "20 DMG (-> 45 next)"), ("Radius", "180px (-> 240px next)"), ("Bullet Destroy", "Locked")]
+        elif self.level == 2:
+            return [("Blast Damage", "45 DMG (-> 70 next)"), ("Radius", "240px (MAX)"), ("Bonus i-frames", "+0.5s")]
+        return [("Blast Damage", "70 DMG (MAX)"), ("Radius", "240px (MAX)"), ("Bullet Destroy", "Destroys Bullets")]
 
     def get_upgrade_description(self) -> str:
         if self.level == 1:
@@ -292,10 +332,18 @@ class StokerSiphonBoon(Boon):
         super().__init__(
             "stoker_siphon", "Stoker's Feast", rarity, "Alchemical",
             "Eliminating an enemy has a 30% chance to restore 6 HP.",
-            RARITY_COLORS["Legendary"]
+            RARITY_COLORS["Legendary"],
+            element="ALCHEMICAL"
         )
         self.chance = 0.30
         self.heal_amt = 6
+
+    def get_stat_breakdown(self) -> list[tuple[str, str]]:
+        if self.level == 1:
+            return [("Proc Chance", "30% (-> 45% next)"), ("Heal on Kill", "6 HP (-> 10 next)"), ("Speed Surge", "Locked")]
+        elif self.level == 2:
+            return [("Proc Chance", "45% (-> 60% next)"), ("Heal on Kill", "10 HP (-> 15 next)"), ("Speed Surge", "Locked")]
+        return [("Proc Chance", "60% (MAX)"), ("Heal on Kill", "15 HP (MAX)"), ("Speed Surge", "+25% Move Speed")]
 
     def get_upgrade_description(self) -> str:
         if self.level == 1:
@@ -326,8 +374,16 @@ class LocomotiveGreaseBoon(Boon):
         super().__init__(
             "locomotive_grease", "Bearing Lubricant", rarity, "Overdrive",
             "+25% movement speed and your dash recharges 35% faster.",
-            COLOR_CRIT_YELLOW
+            COLOR_CRIT_YELLOW,
+            element="MOBILITY"
         )
+
+    def get_stat_breakdown(self) -> list[tuple[str, str]]:
+        if self.level == 1:
+            return [("Move Speed", "+25% (-> +40% next)"), ("Dash CDR", "+35% (-> +55% next)"), ("Wake Slow", "Locked")]
+        elif self.level == 2:
+            return [("Move Speed", "+40% (-> +60% next)"), ("Dash CDR", "+55% (-> +70% next)"), ("Wake Slow", "Locked")]
+        return [("Move Speed", "+60% (MAX)"), ("Dash CDR", "+70% (MAX)"), ("Wake Slow", "40% AoE Slow on Dash")]
 
     def get_upgrade_description(self) -> str:
         if self.level == 1:
@@ -361,10 +417,18 @@ class ExplosiveShrapnelBoon(Boon):
         super().__init__(
             "explosive_shrapnel", "Boiler Rupture", rarity, "Steam",
             "Enemies explode violently upon death, dealing 40 area damage to nearby foes.",
-            (255, 90, 30)
+            (255, 90, 30),
+            element="PYRO"
         )
         self.blast_dmg = 40
         self.blast_radius = 130.0
+
+    def get_stat_breakdown(self) -> list[tuple[str, str]]:
+        if self.level == 1:
+            return [("Explosion DMG", "40 DMG (-> 70 next)"), ("Blast Radius", "130px (-> 180px next)"), ("Secondary Frags", "Locked")]
+        elif self.level == 2:
+            return [("Explosion DMG", "70 DMG (-> 100 next)"), ("Blast Radius", "180px (-> 230px next)"), ("Secondary Frags", "Locked")]
+        return [("Explosion DMG", "100 DMG (MAX)"), ("Blast Radius", "230px (MAX)"), ("Secondary Frags", "Chain Shrapnel Detonations")]
 
     def get_upgrade_description(self) -> str:
         if self.level == 1:
@@ -402,9 +466,17 @@ class MoltenCoreBoon(Boon):
         super().__init__(
             "molten_core", "Molten Fuel", rarity, "Pyro",
             "Attacks ignite foes, inflicting 15 burning damage over 2 seconds.",
-            (255, 110, 40)
+            (255, 110, 40),
+            element="PYRO"
         )
         self.burn_dmg = 15
+
+    def get_stat_breakdown(self) -> list[tuple[str, str]]:
+        if self.level == 1:
+            return [("Burn Damage", "15 DoT (-> 30 next)"), ("Duration", "2.0s (-> 3.0s next)"), ("Vulnerability", "Locked")]
+        elif self.level == 2:
+            return [("Burn Damage", "30 DoT (-> 55 next)"), ("Duration", "3.0s (-> 4.0s next)"), ("Vulnerability", "Locked")]
+        return [("Burn Damage", "55 DoT (MAX)"), ("Duration", "4.0s (MAX)"), ("Vulnerability", "+35% Damage Taken")]
 
     def get_upgrade_description(self) -> str:
         if self.level == 1:
@@ -442,9 +514,17 @@ class CryoCondenserBoon(Boon):
         super().__init__(
             "cryo_condenser", "Cryo Condenser", rarity, "Cryo",
             "Attacks chill targets, slowing enemy movement by 35% for 2 seconds.",
-            (120, 220, 255)
+            (120, 220, 255),
+            element="CRYO"
         )
         self.slow_factor = 0.65
+
+    def get_stat_breakdown(self) -> list[tuple[str, str]]:
+        if self.level == 1:
+            return [("Slow Intensity", "35% (-> 60% next)"), ("Duration", "2.0s (-> 3.5s next)"), ("Freeze Stun", "Locked")]
+        elif self.level == 2:
+            return [("Slow Intensity", "60% (-> 85% next)"), ("Bonus Dmg", "+15% Kinetic"), ("Freeze Stun", "Locked")]
+        return [("Slow Intensity", "85% (MAX)"), ("Bonus Dmg", "+15% Kinetic"), ("Freeze Stun", "1.5s Frozen Solid on 3 hits")]
 
     def get_upgrade_description(self) -> str:
         if self.level == 1:
